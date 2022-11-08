@@ -1,0 +1,12 @@
+ipykernel
+ipython
+jsonschema
+nltk
+numpy
+pandas
+scikit-learn
+scikit-multilearn
+scipy
+texttable
+torch
+tqdm
