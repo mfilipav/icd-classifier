@@ -1,5 +1,5 @@
 # project data, logs, etc
-data/icd_codes/
+# data/icd_codes/
 data/processed/
 data/raw/
 
