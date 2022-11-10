@@ -1,6 +1,6 @@
 import os
 
-DATA_DIR = '../data'
+DATA_DIR = 'data/raw/'
 DATA_COMPRESSION_GZ = True
 
 
