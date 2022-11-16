@@ -19,4 +19,4 @@ requirements.txt
 1. TODO: alternatively use setup.py
 
 1. Download MIMIC-III data files from https://physionet.org/works/MIMICIIIClinicalDatabase/files/
-put .csv.gz files in `data/raw/` directory
+put `.csv.gz` files in `data/raw/` directory
