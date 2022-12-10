@@ -16,7 +16,8 @@ requirements.txt
     $ source venv/bin/activate
     $ pip install -r requirements.txt
     ```
-1. TODO: alternatively use setup.py
+1. install the package
+```pip install -m .```
 
 1. Download MIMIC-III data files from https://physionet.org/works/MIMICIIIClinicalDatabase/files/
 put .csv.gz files in `data/raw/` directory
