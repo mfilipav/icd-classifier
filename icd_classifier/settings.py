@@ -1,7 +1,9 @@
 import os
 
-DATA_DIR = 'data/raw/'
+MIMIC_3_DIR = 'data/raw'
+DATA_DIR = 'data/processed'
 DATA_COMPRESSION_GZ = True
+MODEL_DIR = 'models/'
 
 
 class Tables:
@@ -21,3 +23,8 @@ class Keys:
     icd9 = "ICD9_CODE"
     note_category = "CATEGORY"
     text = "TEXT"
+
+
+PAD_CHAR = "**PAD**"
+EMBEDDING_SIZE = 100
+MAX_LENGTH = 2500

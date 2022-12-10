@@ -1,8 +1,6 @@
 import os
 from collections import Counter
 import pandas as pd
-import pickle
-import numpy as np
 import logging
 from icd_classifier.settings import Keys, Tables, DATA_DIR, DATA_COMPRESSION_GZ
 
