@@ -9,4 +9,10 @@ scikit-multilearn
 scipy
 texttable
 torch
+torchaudio
+torchtext
+torchvision
 tqdm
+gensim
+flake8
+python-dotenv
