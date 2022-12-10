@@ -2,6 +2,7 @@
 # data/icd_codes/
 data/processed/
 data/raw/
+project_planning.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

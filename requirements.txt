@@ -3,6 +3,7 @@ ipython
 jsonschema
 nltk
 numpy
+networkx
 pandas
 scikit-learn
 scikit-multilearn
