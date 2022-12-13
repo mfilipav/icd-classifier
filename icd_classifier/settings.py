@@ -1,4 +1,16 @@
+import logging
 import os
+
+FORMAT = "[%(asctime)s %(filename)s->%(funcName)s():%(lineno)s]%(levelname)s: %(message)s"
+logging.basicConfig(
+    level=logging.DEBUG,
+    datefmt="%Y-%m-%d %H:%M:%S",
+    format=FORMAT)
+
+logging.basicConfig(format='%(asctime)s %(message)s',
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                    level=logging.DEBUG)
+
 
 MIMIC_3_DIR = 'data/raw'
 DATA_DIR = 'data/processed'
