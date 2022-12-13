@@ -2,6 +2,7 @@
     Concatenate the labels with the notes data and split using the saved splits
 """
 import csv
+import logging
 from icd_classifier.settings import MIMIC_3_DIR
 
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -39,7 +40,8 @@ def concat_data(labelsfile, notes_file, outfilename):
 
 
 def split_data(labeledfile, base_name):
-    print("SPLITTING")
+    logging.info('Splitting')
+
     # create and write headers for train, dev, test
     train_name = '%s_train_split.csv' % (base_name)
     dev_name = '%s_dev_split.csv' % (base_name)
@@ -50,27 +52,30 @@ def split_data(labeledfile, base_name):
     train_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
     dev_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
     test_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
+    print('train split name: ', train_name)
+    print('labeled name: ', labeledfile)
 
     hadm_ids = {}
 
-    #read in train, dev, test splits
+    # read in train, dev, test splits
     for splt in ['train', 'dev', 'test']:
         hadm_ids[splt] = set()
-        with open('%s/%s_full_hadm_ids.csv' % (MIMIC_3_DIR, splt), 'r') as f:
+        splt_hadm_ids = '%s/%s_full_hadm_ids.csv' % (MIMIC_3_DIR, splt)
+        logging.info("reading in from files: {}".format(splt_hadm_ids))
+        with open(splt_hadm_ids, 'r') as f:
             for line in f:
                 hadm_ids[splt].add(line.rstrip())
 
     with open(labeledfile, 'r') as lf:
         reader = csv.reader(lf)
         next(reader)
-        i = 0
-        cur_hadm = 0
-        for row in reader:
-            #filter text, write to file according to train/dev/test split
-            if i % 10000 == 0:
-                print(str(i) + " read")
-
+        for i, row in enumerate(reader):
+            # filter text, write to file according to train/dev/test split
             hadm_id = row[1]
+            if i % 10000 == 0:
+                logging.info(
+                    "Row {} read. HADM_ID = {}.\nRow: {}".format(
+                        str(i), hadm_id, row))
 
             if hadm_id in hadm_ids['train']:
                 train_file.write(','.join(row) + "\n")
@@ -79,11 +84,11 @@ def split_data(labeledfile, base_name):
             elif hadm_id in hadm_ids['test']:
                 test_file.write(','.join(row) + "\n")
 
-            i += 1
-
         train_file.close()
         dev_file.close()
         test_file.close()
+    logging.info("Done splitting. Train file name: {}".format(train_name))
+
     return train_name, dev_name, test_name
     
     

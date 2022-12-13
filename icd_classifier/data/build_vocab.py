@@ -1,14 +1,17 @@
 """
-    This script reads a sorted training dataset and builds a vocabulary of terms of given size
+    This script reads a sorted training dataset and
+    builds a vocabulary of terms of given size
     Output: txt file with vocab words
     Drops any token not appearing in at least vocab_min notes
 
-    This script could probably be replaced by using sklearn's CountVectorizer to build a vocab
+    This script could probably be replaced by using sklearn's
+    CountVectorizer to build a vocab
 """
 import csv
 import numpy as np
 import operator
 from scipy.sparse import csr_matrix
+import logging
 
 
 def build_vocab(vocab_min, infile, vocab_filename):
@@ -24,7 +27,7 @@ def build_vocab(vocab_min, infile, vocab_filename):
         next(reader)
 
         # 0. read in data
-        print("reading in data...")
+        logging.info("Building vocabulary from file: {}".format(infile))
         # holds number of terms in each document
         note_numwords = []
         # indices where notes start
@@ -59,10 +62,11 @@ def build_vocab(vocab_min, infile, vocab_filename):
             note_numwords.append(numwords)
             i += 1
         # clip trailing zeros
-        note_occur = note_occur[note_occur>0]
+        note_occur = note_occur[note_occur > 0]
 
         # turn vocab into a list so indexing doesn't get fd up when we drop rows
-        vocab_list = np.array([word for word,ind in sorted(vocab.items(), key=operator.itemgetter(1))])
+        vocab_list = np.array(
+            [word for word, ind in sorted(vocab.items(), key=operator.itemgetter(1))])
 
         # 1. create sparse document matrix
         C = csr_matrix((data, indices, note_inds), dtype=int).transpose()
@@ -71,17 +75,20 @@ def build_vocab(vocab_min, infile, vocab_filename):
         
         # 2. remove rows with less than 3 total occurrences
         print("removing rare terms")
-        # inds holds indices of rows corresponding to terms that occur in < 3 documents
+        # inds holds indices of rows corresponding to terms that occur in >= 3 documents
         inds = np.nonzero(note_occur >= vocab_min)[0]
-        print(str(len(inds)) + " terms qualify out of " + str(C.shape[0]) + " total")
+        logging.info(
+            "{} word tokens occur in {} or more documents, out "
+            "{} total words".format(str(len(inds)), vocab_min, str(C.shape[0])))
         
         # drop those rows
         C = C[inds, :]
         note_occur = note_occur[inds]
         vocab_list = vocab_list[inds]
 
-        print("writing output")
+        logging.info("Writing vocab to {}".format(vocab_filename))
         with open(vocab_filename, 'w') as vocab_file:
             for word in vocab_list:
                 vocab_file.write(word + "\n")
-
+        logging.info("Done! Some vocab examples, head: {}, tail: {}".format(
+            vocab_list[0:50], vocab_list[-50:]))

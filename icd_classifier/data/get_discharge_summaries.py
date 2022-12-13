@@ -1,5 +1,6 @@
 """
-    Reads NOTEEVENTS file, finds the discharge summaries, preprocesses them and writes out the filtered dataset.
+    Reads NOTEEVENTS file, finds the discharge summaries,
+    preprocesses them and writes out the filtered dataset.
 """
 import csv
 import gzip
@@ -19,7 +20,8 @@ def write_discharge_summaries(notes_file, out_file):
         # with open(notes_file, 'r') as csvfile:
         with open(out_file, 'w') as outfile:
             print("writing to %s" % (out_file))
-            outfile.write(','.join(['SUBJECT_ID', 'HADM_ID', 'CHARTTIME', 'TEXT']) + '\n')
+            outfile.write(','.join([
+                'SUBJECT_ID', 'HADM_ID', 'CHARTTIME', 'TEXT']) + '\n')
             notereader = csv.reader(csvfile)
             # header
             next(notereader)
