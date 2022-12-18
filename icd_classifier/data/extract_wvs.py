@@ -4,7 +4,7 @@
 import numpy as np
 import gensim.models
 from tqdm import tqdm
-from settings import PAD_CHAR
+from icd_classifier.settings import PAD_CHAR
 
 
 def gensim_to_embeddings(wv_file, vocab_file, Y, outfile=None):

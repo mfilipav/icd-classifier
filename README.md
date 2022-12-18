@@ -21,3 +21,9 @@ requirements.txt
 
 1. Download MIMIC-III data files from https://physionet.org/works/MIMICIIIClinicalDatabase/files/
 put `.csv.gz` files in `data/raw/` directory
+
+1. Data preprocessing:
+start jupyter notebook
+```jupyter-notebook icd_classifier```
+and execute `data_preprocessing_and_embedding.ipynb` notebook (cell-by-cell or all at once [15 min])
+
