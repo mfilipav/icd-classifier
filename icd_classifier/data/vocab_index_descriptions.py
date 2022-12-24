@@ -27,7 +27,9 @@ def vocab_index_descriptions(vocab_file, vectors_file):
         for code, desc in tqdm(desc_dict.items()):
             # same preprocessing steps as in get_discharge_summaries
             tokens = [
-                t.lower() for t in tokenizer.tokenize(desc) if not t.isnumeric()]
+                t.lower() for t in tokenizer.tokenize(
+                    desc) if not t.isnumeric()]
             inds = [
-                w2ind[t] if t in w2ind.keys() else len(w2ind)+1 for t in tokens]
+                w2ind[t] if t in w2ind.keys() else len(
+                    w2ind) + 1 for t in tokens]
             w.writerow([code] + [str(i) for i in inds])
