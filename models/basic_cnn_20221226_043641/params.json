@@ -1,0 +1,17 @@
+{
+ "Y": "50",
+ "filter_size": "4",
+ "dropout": 0.2,
+ "num_filter_maps": 50,
+ "rnn_dim": 128,
+ "cell_type": "gru",
+ "rnn_layers": 1,
+ "lmbda": 0,
+ "command": "python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model basic_cnn --n_epochs 100 --filter-size 4 --num-filter-maps 50 --dropout 0.2 --lr 0.003 --embeddings-file data/processed/processed_full.embed --gpu",
+ "weight_decay": 0,
+ "data_path": "data/processed/train_50.csv",
+ "vocab": "data/processed/vocab.csv",
+ "embed_file": "data/processed/processed_full.embed",
+ "lr": 0.003,
+ "model_dir": "/home/modestas.filipavicius/dev/icd-classifier/models/basic_cnn_20221226_043641"
+}
