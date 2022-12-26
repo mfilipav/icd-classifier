@@ -1,10 +1,11 @@
 import logging
 import os
 
-FORMAT = "[%(asctime)s %(filename)s->%(funcName)s():%(lineno)s]%(levelname)s: %(message)s"
+FORMAT = ("%(asctime)s %(filename)s::%(funcName)s() L%(lineno)s, "
+          "%(levelname)s: %(message)s")
 logging.basicConfig(
     level=logging.DEBUG,
-    datefmt="%Y-%m-%d %H:%M:%S",
+    datefmt="%H:%M:%S %Y-%m-%d",
     format=FORMAT)
 
 logging.basicConfig(format='%(asctime)s %(message)s',

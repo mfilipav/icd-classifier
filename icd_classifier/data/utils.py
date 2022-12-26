@@ -33,28 +33,45 @@ def load_code_descriptions():
         # header
         next(r)
         for row in r:
-            code = row[1]
+            code = reformat(row[1], True)
             desc = row[-1]
-            desc_dict[reformat(code, True)] = desc
-    with open("%s/D_ICD_PROCEDURES.csv" % (DATA_DIR), 'r') as descfile:
-        r = csv.reader(descfile)
+            desc_dict[code] = desc
+        logging.debug(
+            "1. Done loading ICD Diagnoses into desc_dict, "
+            "dict length={}. Last item: {}:{}".format(
+                len(desc_dict), code, desc))
+
+    with open("%s/D_ICD_PROCEDURES.csv" % (DATA_DIR), 'r') as procfile:
+        r = csv.reader(procfile)
         # header
         next(r)
         for row in r:
             code = row[1]
             desc = row[-1]
             if code not in desc_dict.keys():
-                desc_dict[reformat(code, False)] = desc
+                code = reformat(code, False)
+                desc_dict[code] = desc
+        logging.debug(
+            "2. Done loading ICD Procedures into desc_dict, "
+            "dict length={}. Last item: {}:{}".format(
+                len(desc_dict), code, desc))
+
     with open('%s/ICD9_descriptions' % DATA_DIR, 'r') as labelfile:
-        for i, row in enumerate(labelfile):
+        for row in labelfile:
             row = row.rstrip().split()
             code = row[0]
             if code not in desc_dict.keys():
-                desc_dict[code] = ' '.join(row[1:])
+                desc = ' '.join(row[1:])
+                desc_dict[code] = desc
+        logging.debug(
+            "3. Done loading ICD Descriptions into desc_dict, "
+            "dict length={}. Last item: {}:{}".format(
+                len(desc_dict), code, desc))
+    logging.info("Done. Size of desc_dict: {}".format(len(desc_dict)))
     return desc_dict
 
 
-def load_description_vectors(Y, version='mimic3'):
+def load_description_vectors(Y):
     # load description one-hot vectors from file
     dv_dict = {}
     data_dir = MIMIC_3_DIR
@@ -88,8 +105,6 @@ class Batch:
         """
             Makes an instance to add to this batch from given row data, with a bunch of lookups
         """
-        logging.debug("calling adding instance")
-
         labels = set()
         hadm_id = int(row[1])
         text = row[2]
@@ -166,13 +181,19 @@ def data_generator(filename, dicts, batch_size, num_labels, desc_embed=False):
             batch_size: the batch size for train iterations
             num_labels: size of label output space
             desc_embed: true if using DR-CAML (lambda > 0)
-            version: which (MIMIC) dataset
         Yields:
             np arrays with data for training loop.
     """
-    logging.info("Call data generator with Batch")
+    logging.debug(
+        "Creating batch of np arrays with sorted-by-length data for "
+        "training loop; data source: {}, batch size: {}, "
+        "label space: {}".format(filename, batch_size, num_labels))
 
-    ind2w, w2ind, ind2c, c2ind, dv_dict = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind'], dicts['dv']
+    # ind2w = dicts['ind2w']
+    w2ind = dicts['w2ind']
+    ind2c = dicts['ind2c']
+    c2ind = dicts['c2ind']
+    dv_dict = dicts['dv']
     with open(filename, 'r') as infile:
         r = csv.reader(infile)
         # header
@@ -236,7 +257,7 @@ def load_lookups(args, desc_embed=False):
 
     # get description one-hot vector lookup
     if desc_embed:
-        dv_dict = load_description_vectors(args.Y, version=args.version)
+        dv_dict = load_description_vectors(args.Y)
     else:
         dv_dict = None
 

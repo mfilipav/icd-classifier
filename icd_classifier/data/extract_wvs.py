@@ -5,6 +5,7 @@ import numpy as np
 import gensim.models
 from tqdm import tqdm
 from icd_classifier.settings import PAD_CHAR
+import logging
 
 
 def gensim_to_embeddings(wv_file, vocab_file, Y, outfile=None):
@@ -36,14 +37,27 @@ def build_matrix(ind2w, wv):
         Note: ind2w starts at 1 (saving 0 for the pad character),
         but gensim word vectors starts at 0
     """
-    W = np.zeros((len(ind2w)+1, len(wv.word_vec(wv.index_to_key[0])) ))
+    W = np.zeros(
+        (
+            len(ind2w) + 1,
+            len(wv.word_vec(wv.index_to_key[0]))
+        )
+    )
+
     words = [PAD_CHAR]
-    W[0][:] = np.zeros(len(wv.word_vec(wv.index_to_key[0])))
+
+    W[0][:] = np.zeros(
+        len(wv.word_vec(wv.index_to_key[0]))
+    )
+
     for idx, word in tqdm(ind2w.items()):
         if idx >= W.shape[0]:
-            break    
+            break
         W[idx][:] = wv.word_vec(word)
         words.append(word)
+    logging.info(
+        "Built w2v matrix of shape: {}, from {} words".format(
+            W.size(), len(words)))
     return W, words
 
 
@@ -54,6 +68,9 @@ def save_embeddings(W, words, outfile):
             line = [words[i]]
             line.extend([str(d) for d in W[i]])
             o.write(" ".join(line) + "\n")
+        logging.info(
+            "Saved embeddings to file: {}, of length: {}. "
+            "Total words: {} ".format(outfile, len(W), len(words)))
 
 
 def load_embeddings(embed_file):
@@ -66,7 +83,7 @@ def load_embeddings(embed_file):
             vec = vec / float(np.linalg.norm(vec) + 1e-6)
             W.append(vec)
         # UNK embedding, gaussian randomly initialized
-        print("adding unk embedding")
+        logging.info("adding unk embedding")
         vec = np.random.randn(len(W[-1]))
         vec = vec / float(np.linalg.norm(vec) + 1e-6)
         W.append(vec)

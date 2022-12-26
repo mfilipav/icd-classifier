@@ -349,7 +349,6 @@ def intersect_size(yhat, y, axis):
 
 
 def print_metrics(metrics):
-    logging.info(" PRINT METRICS ")
     if "auc_macro" in metrics.keys():
         logging.info("[MACRO] accuracy, precision, recall, f-measure, AUC")
         logging.info("%.4f, %.4f, %.4f, %.4f, %.4f" % (metrics["acc_macro"], metrics["prec_macro"], metrics["rec_macro"], metrics["f1_macro"], metrics["auc_macro"]))
@@ -366,7 +365,6 @@ def print_metrics(metrics):
     for metric, val in metrics.items():
         if metric.find("rec_at") != -1:
             logging.info("%s: %.4f" % (metric, val))
-    logging.info(" END PRINT METRICS ")
 
 
 if __name__ == "__main__":

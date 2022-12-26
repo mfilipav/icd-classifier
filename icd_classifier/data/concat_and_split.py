@@ -31,16 +31,19 @@ def concat_data(labelsfile, notes_file, outfilename):
                     cur_subj, cur_labels, cur_hadm = next(labels_gen)
 
                     if cur_hadm == hadm_id:
-                        w.writerow([subj_id, str(hadm_id), text, ';'.join(cur_labels)])
+                        w.writerow([
+                            subj_id, str(hadm_id), text, ';'.join(cur_labels)])
                     else:
-                        print("couldn't find matching hadm_id. data is probably not sorted correctly")
+                        logging.error(
+                            "cur_hadm={} doesn't match with hadm_id={}, data "
+                            "is probably sorted incorrectly!".format(
+                                cur_hadm, hadm_id))
                         break
-                    
     return outfilename
 
 
 def split_data(labeledfile, base_name):
-    logging.info('Splitting')
+    logging.info('Splitting data')
 
     # create and write headers for train, dev, test
     train_name = '%s_train_split.csv' % (base_name)
@@ -49,9 +52,12 @@ def split_data(labeledfile, base_name):
     train_file = open(train_name, 'w')
     dev_file = open(dev_name, 'w')
     test_file = open(test_name, 'w')
-    train_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
-    dev_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
-    test_file.write(','.join(['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
+    train_file.write(','.join(
+        ['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
+    dev_file.write(','.join(
+        ['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
+    test_file.write(','.join(
+        ['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
     print('train split name: ', train_name)
     print('labeled name: ', labeledfile)
 
@@ -90,14 +96,14 @@ def split_data(labeledfile, base_name):
     logging.info("Done splitting. Train file name: {}".format(train_name))
 
     return train_name, dev_name, test_name
-    
-    
+
+
 def next_labels(labelsfile):
     """
         Generator for label sets from the label file
     """
     labels_reader = csv.reader(labelsfile)
-    #header
+    # header
     next(labels_reader)
 
     first_label_line = next(labels_reader)
@@ -110,24 +116,26 @@ def next_labels(labelsfile):
         subj_id = int(row[0])
         hadm_id = int(row[1])
         code = row[2]
-        #keep reading until you hit a new hadm id
+        # keep reading until you hit a new hadm id
         if hadm_id != cur_hadm or subj_id != cur_subj:
             yield cur_subj, cur_labels, cur_hadm
             cur_labels = [code]
             cur_subj = subj_id
             cur_hadm = hadm_id
         else:
-            #add to the labels and move on
+            # add to the labels and move on
             cur_labels.append(code)
     yield cur_subj, cur_labels, cur_hadm
+
 
 def next_notes(notesfile):
     """
         Generator for notes from the notes file
-        This will also concatenate discharge summaries and their addenda, which have the same subject and hadm id
+        This will also concatenate discharge summaries and their addenda,
+        which have the same subject and hadm id
     """
     nr = csv.reader(notesfile)
-    #header
+    # header
     next(nr)
 
     first_note = next(nr)
@@ -135,18 +143,18 @@ def next_notes(notesfile):
     cur_subj = int(first_note[0])
     cur_hadm = int(first_note[1])
     cur_text = first_note[3]
-    
+
     for row in nr:
         subj_id = int(row[0])
         hadm_id = int(row[1])
         text = row[3]
-        #keep reading until you hit a new hadm id
+        # keep reading until you hit a new hadm id
         if hadm_id != cur_hadm or subj_id != cur_subj:
             yield cur_subj, cur_text, cur_hadm
             cur_text = text
             cur_subj = subj_id
             cur_hadm = hadm_id
         else:
-            #concatenate to the discharge summary and move on
+            # concatenate to the discharge summary and move on
             cur_text += " " + text
     yield cur_subj, cur_text, cur_hadm
