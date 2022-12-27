@@ -218,6 +218,14 @@ def auc_metrics(yhat_raw, y, ymic):
 # METRICS BY CODE TYPE
 ########################
 def results_by_type(Y, mdir):
+    """
+    preds_test.psv
+    193800|45.13|486|530.81|V15.82
+    158927|33.24|38.93|401.9|518.81|96.04|96.71|96.72
+    127022|250.00|272.4|276.2|401.9|414.01|427.31|428.0|V45.81|V58.61
+    177566|
+    
+    """
     d2ind = {}
     p2ind = {}
 
@@ -226,6 +234,7 @@ def results_by_type(Y, mdir):
     proc_preds = defaultdict(lambda: set([]))
     preds = defaultdict(lambda: set())
     with open('%s/preds_test.psv' % mdir, 'r') as f:
+
         r = csv.reader(f, delimiter='|')
         for row in r:
             if len(row) > 1:
@@ -233,6 +242,8 @@ def results_by_type(Y, mdir):
                     preds[row[0]].add(code)
                     if code != '':
                         try:
+                            # what throws the error here?
+                            # see reformat() function
                             pos = code.index('.')
                             if pos == 3 or (code[0] == 'E' and pos == 4):
                                 if code not in d2ind:
@@ -284,7 +295,8 @@ def results_by_type(Y, mdir):
     ind2d = {i: d for d, i in d2ind.items()}
     ind2p = {i: p for p, i in p2ind.items()}
     type_dicts = (ind2d, ind2p)
-    return diag_preds, diag_golds, proc_preds, proc_golds, golds, preds, hadm_ids, type_dicts
+    return (diag_preds, diag_golds, proc_preds, proc_golds,
+            golds, preds, hadm_ids, type_dicts)
 
 
 def diag_f1(diag_preds, diag_golds, ind2d, hadm_ids):

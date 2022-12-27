@@ -221,7 +221,7 @@ def load_vocab_dict(args, vocab_file):
             if line != '':
                 vocab.add(line.strip())
     # hack because the vocabs were created differently for these models
-    if args.public_model and args.Y == 'full' and args.model == 'conv_attn':
+    if args.Y == 'full' and args.public_model and args.model == 'conv_attn':
         ind2w = {i: w for i, w in enumerate(sorted(vocab))}
     else:
         ind2w = {i + 1: w for i, w in enumerate(sorted(vocab))}

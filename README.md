@@ -38,6 +38,10 @@ Logistic regression
 - with max pooling vs averaging strategies
 
 ```
+# much better results
+python icd_classifier/modeling/log_reg.py --train_file data/processed/train_50.csv --dev_file data/processed/dev_50.csv --vocab data/processed/vocab.csv --Y 50 --ngram 0
+
+# TODO: resolve issues with this implementation
 python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model log_reg --n_epochs 100 --pool avg --batch-size 16 --lr 0.003 --embeddings-file data/processed/processed_full.embed --gpu
 ```
 
