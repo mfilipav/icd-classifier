@@ -214,14 +214,23 @@ def data_generator(filename, dicts, batch_size, num_labels, desc_embed=False):
 
 def load_vocab_dict(args, vocab_file):
     # reads vocab_file into two lookups (word:ind) and (ind:word)
+    try:
+        if args.public_model:
+            public_model = True
+        else:
+            public_model = False
+    except:
+        public_model = False
+
     vocab = set()
+
     with open(vocab_file, 'r') as vocabfile:
         for i, line in enumerate(vocabfile):
             line = line.rstrip()
             if line != '':
                 vocab.add(line.strip())
     # hack because the vocabs were created differently for these models
-    if args.Y == 'full' and args.public_model and args.model == 'conv_attn':
+    if all([args.Y == 'full', public_model, args.model == 'conv_attn']):
         ind2w = {i: w for i, w in enumerate(sorted(vocab))}
     else:
         ind2w = {i + 1: w for i, w in enumerate(sorted(vocab))}
