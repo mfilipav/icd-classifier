@@ -1,5 +1,6 @@
 """
-    Reads (or writes) BOW-formatted notes and performs scikit-learn logistic regression
+    Reads (or writes) BOW-formatted notes, and performs
+    scikit-learn classification: logistic regression, SVC
 """
 import os
 import sys
@@ -12,9 +13,10 @@ import csv
 import numpy as np
 import nltk
 from scipy.sparse import csr_matrix
-from sklearn.linear_model import LogisticRegression
 from sklearn.multiclass import OneVsRestClassifier
-
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC, LinearSVC
+from sklearn.linear_model import SGDClassifier
 from icd_classifier.settings import MODEL_DIR, DATA_DIR
 from icd_classifier.data import utils
 import evaluation
@@ -232,8 +234,10 @@ def main(args):
     csv.field_size_limit(sys.maxsize)
     if args.Y == '50':
         args.Y = 50
-
-    logging.info("Start log reg")
+    train_bows_file = args.train_file.split('.csv')[0] + '_bows.csv'
+    dev_bows_file = args.dev_file.split('.csv')[0] + '_bows.csv'
+    
+    logging.info("Start log reg with BOW document representation")
 
     dicts = utils.load_lookups(args)
     # w2ind: length 51917, {'000cc': 1, '000mcg': 2, '000mg': 3, '000s': 4, ..
@@ -246,40 +250,33 @@ def main(args):
     w2ind, ind2c, c2ind = dicts['w2ind'], dicts['ind2c'], dicts['c2ind']
     logging.info("Done with lookups, length of dicts: {}".format(len(dicts)))
 
-    # outputs: csr_matrix((data, indices, subj_inds)), np.array(yy), hadm_ids
-    X, y, hadm_ids = construct_X_Y(
-        args.train_file, args.Y, w2ind, c2ind)
-    X_dv, y_dv, hadm_ids_dv = construct_X_Y(
-        args.dev_file, args.Y, w2ind, c2ind)
+    logging.info("Start log reg. Prepare or read in BOW data from: {}".format(
+        train_bows_file))
 
-    # write out
-    train_bows = args.train_file.split('.csv')[0] + '_bows.csv'
-    dev_bows = args.dev_file.split('.csv')[0] + '_bows.csv'
-    write_bows(train_bows, X, hadm_ids, y, ind2c)
-    write_bows(dev_bows, X_dv, hadm_ids_dv, y_dv, ind2c)
+    if not os.path.isfile(train_bows_file):
 
-    # read in bows files
-    # train first two examples:
-    # HADM_ID,BOW,LABELS
-    # 182396, 1765:1 3569:2 3660:1 3829:1 4406:1 4888:1 5446:4 8400:1 9541:1 9566:1 11221:1 11353:2 12337:1
-    # 14086:2 14227:3 14250:1 14955:1 15097:1 15389:1 15394:1 15751:1 18270:1 19603:1 19690:2 20086:1 20581:1
-    # 21407:1 22437:1 22444:1 22590:1 22916:1 23207:2 23441:1 24086:1 24631:1 25394:1 25769:1
-    # 25959:1 26543:1 26816:2 27470:1 27737:1 28723:2 28988:1 29291:1 29447:1 30955:1 31318:2
-    # 31320:1 31337:1 31441:1 32516:1 32697:2 33097:5 33163:1 33274:1 34284:1 34846:1 34914:2
-    # 34943:1 37393:1 37408:1 40369:1 40557:1 42455:1 42836:1 42920:1 43518:1 46159:1 46919:4
-    # 47072:1 47163:1 47565:2 48764:1 51035:1 51160:1 51264:4 51735:1 51765:1,
-    #   287.5;45.13;584.9
-    # 183363, 3569:4 4406:1 4634:1 5446:1 8400:1 9015:1 9269:2 9541:2 13739:1 14086:1
-    # 14227:3 14243:1 14291:1 14362:1 14391:1 15227:1 15389:1 15538:1 15751:2 15970:1
-    # 16433:1 17617:1 18554:1 18702:1 19587:1 20086:1 20581:1 20710:1 20853:1 22322:1
-    # 22437:3 22440:1 22831:2 22833:1 23004:2 23207:1 23424:1 26183:2 26816:2 27470:2
-    # 28988:1 29291:1 29447:1 30955:1 31318:3 31320:1 31339:2 31827:1 32697:2 33097:2
-    # 33163:1 33250:1 33370:1 33535:1 33858:1 34943:1 38518:1 41586:2 42181:1 42451:1
-    # 42836:2 42920:1 43129:1 45144:1 45157:1 46159:1 46919:4 47072:1 47565:2 48268:1
-    # 50840:5 51160:1 51264:3 51735:1,
-    #  272.4;401.9;96.71
-    X, yy_tr, hids_tr = read_bows(train_bows, c2ind)
-    X_dv, yy_dv, hids_dv = read_bows(dev_bows, c2ind)
+        # outputs: csr_matrix((data, indices, subj_inds)), np.array(yy), hadm_ids
+        X, y, hadm_ids = construct_X_Y(
+            args.train_file, args.Y, w2ind, c2ind)
+        X_dv, y_dv, hadm_ids_dv = construct_X_Y(
+            args.dev_file, args.Y, w2ind, c2ind)
+
+        # write out
+        write_bows(train_bows_file, X, hadm_ids, y, ind2c)
+        write_bows(dev_bows_file, X_dv, hadm_ids_dv, y_dv, ind2c)
+
+        # read in bows files
+        # train first two examples:
+        # HADM_ID,BOW,LABELS
+        # 182396,
+        # 1765:1 3569:2 3660:1 3829:1 4406:1 4888:1 5446:4 8400:1 9541:1  
+        # 46919:4 <....> 1160:1 51264:4 51735:1 51765:1,  # 79 words total
+        #   287.5;45.13;584.9
+    else:
+        logging.info("Found existing BOWs file: {}. Skip its "
+                     "preprocessing".format(train_bows_file))
+        X, yy_tr, hids_tr = read_bows(train_bows_file, c2ind)
+        X_dv, yy_dv, hids_dv = read_bows(dev_bows_file, c2ind)
 
     # X.shape: (8066, 51918)
     # yy_tr.shape: (8066, 50)
@@ -300,29 +297,56 @@ def main(args):
         "Training labels with examples: {}, original:{}".format(
             yy.shape, yy_tr.shape))
 
-    # STEP 2: ONE-VS-REST MULTILABEL LOGISTIC REGRESSION CLASSIFICATION
-
+    # STEP 2: ONE-VS-REST MULTILABEL CLASSIFICATION
     # build the classifier
-    logging.info("Building One-vs-Rest Log Reg classifier")
-    # n_jobs=-1 means using all CPU resources
-    clf = OneVsRestClassifier(
-        LogisticRegression(
-            C=args.c, max_iter=args.max_iter, solver='sag'), n_jobs=-1)
+    model = args.model
+    if model == 'log_reg':
+        logging.info("Building One-vs-Rest Log Reg classifier, with probs")
+        # n_jobs=-1 means using all CPU resources
+        # try solver=newton-cholesky, class_weight='balanced'
+        clf = OneVsRestClassifier(LogisticRegression(
+                C=args.c, max_iter=args.max_iter, penalty='l2', dual=False,
+                solver='sag', multiclass='ovr', class_weight='balanced',
+                verbose=True, n_jobs=-1), n_jobs=-1)
+    elif model == 'svc':
+        logging.info("Building RBF SVC classifier with probabilities")
+        # kernel='rbf' -- slow; TODO: more memory!!
+        clf = OneVsRestClassifier(SVC(
+                C=1, kernel='linear', class_weight='balanced',
+                probability=True, decision_function_shape='ovr',
+                cache_size=1000, verbose=True), n_jobs=-1)
+    elif model == 'linear_svc':
+        logging.info("Building Linear SVC classifier, no probs")
+        clf = OneVsRestClassifier(LinearSVC(
+                penalty='l2', loss='squared_hinge', dual=False, C=1,
+                class_weight='balanced', verbose=True), n_jobs=-1)
+    elif model == 'sgd_linear_svm_':
+        logging.info("Building SGDClassifier with SGD training, no probs")
+        clf = OneVsRestClassifier(SGDClassifier(
+                penalty='l2', loss='hinge', dual=False, C=1,
+                class_weight='balanced', verbose=True), n_jobs=-1)
+    else:
+        logging.error('Unsupported classifier: {}'.format(model))
     # TODO where is clf.coef_ ?
     # logging.info("clf.estimators_: {}".format(clf.estimators_))
 
     # train
     logging.info("Training/fitting classifier...")
-    #
     clf.fit(X, yy)
 
-    # predict
-    logging.info("predicting...")
+    logging.info("Predicting on dev set...")
+    # yhat: binary predictions matrix
+    # yhat_raw: prediction scores matrix (floats)
     yhat = clf.predict(X_dv)
-    yhat_raw = clf.predict_proba(X_dv)
+
+    if any([model == 'svc', model == 'log_reg']):
+        yhat_raw = clf.predict_proba(X_dv)
+    else:
+        yhat_raw = yhat
+    logging.info("Predicting on dev set. Example from yhat: {}".format(yhat[0]))
 
     # deal with labels that don't have positive training examples
-    logging.info("reshaping output to deal with labels missing from train set")
+    logging.info("Reshaping output to deal with labels missing from train set")
     labels_with_examples = set(labels_with_examples)
     yhat_full = np.zeros(yy_dv.shape)
     yhat_full_raw = np.zeros(yy_dv.shape)
@@ -334,24 +358,36 @@ def main(args):
             j += 1
 
     # evaluate
-    logging.info("evaluating...")
+    # Precision@5 for top 50 labels experiment; @8/15 for 'full'
+    logging.info("Evaluating on dev set...")
     k = 5 if args.Y == 50 else [8, 15]
+
+    # only Logistic Regression and SCV provide probabilities
+    if any([not model == 'svc', not model == 'log_reg']):
+        yhat_full_raw = None
     metrics = evaluation.all_metrics(
         yhat_full, yy_dv, k=k, yhat_raw=yhat_full_raw)
-    logging.info("metrics: {}".format(metrics))
+
+    logging.info("metrics after dev evaluation: {}".format(metrics))
     evaluation.print_metrics(metrics)
 
     # save metric history, model, params
-    logging.info("saving predictions")
     model_dir = os.path.join(MODEL_DIR, '_'.join(
-        ["log_reg", time.strftime('%Y%m%d_%H%M%S', time.localtime())]))
+        [model, time.strftime('%Y%m%d_%H%M%S', time.localtime())]))
     os.mkdir(model_dir)
-    preds_file = tools.write_preds(
-        yhat_full, model_dir, hids_dv, 'test', yhat_full_raw)
+    if model == 'log_reg':
+        logging.info("Saving predictions")
+        preds_file = tools.write_preds(
+            yhat_full, model_dir, hids_dv, 'test', yhat_full_raw)
 
-    logging.info("sanity check on train")
+    logging.info("Predicting on train set...")
+    # yhat: binary predictions matrix
+    # yhat_raw: prediction scores matrix (floats)
     yhat_tr = clf.predict(X)
-    yhat_tr_raw = clf.predict_proba(X)
+    if any([model == 'svc', model == 'log_reg']):
+        yhat_tr_raw = clf.predict_proba(X)
+    else:
+        yhat_tr_raw = yhat_tr
 
     # reshape output again
     logging.info("reshape output again...")
@@ -368,24 +404,26 @@ def main(args):
             yhat_tr_full.shape, yhat_tr_full_raw.shape))
 
     # evaluate again
-    logging.info("evaluating again...")
+    logging.info("Evaluating on training set")
+    if any([not model == 'svc', not model == 'log_reg']):
+        yhat_tr_full_raw = None
     metrics_tr = evaluation.all_metrics(
         yhat_tr_full, yy_tr, k=k, yhat_raw=yhat_tr_full_raw)
-    logging.info("metrics again: {}".format(metrics))
+    logging.info("metrics after train evaluation: {}".format(metrics))
     evaluation.print_metrics(metrics_tr)
 
     if args.ngram > 0:
-        logging.info("calculating {}-grams using file: {}".format(
-            args.ngram, dev_bows))
+        logging.info("Calculating {}-grams using file: {}".format(
+            args.ngram, dev_bows_file))
         calculate_top_ngrams(
-            dev_bows, clf, c2ind, w2ind, labels_with_examples, args.ngram)
+            dev_bows_file, clf, c2ind, w2ind, labels_with_examples, args.ngram)
 
     # Commenting this out because the models are huge (11G for mimic3 full)
     # logging.info("saving model")
     # with open("%s/model.pkl" % model_dir, 'wb') as f:
     #     pickle.dump(clf, f)
 
-    logging.info("saving metrics")
+    logging.info("Preparing and saving metrics")
     metrics_hist = defaultdict(lambda: [])
     metrics_hist_tr = defaultdict(lambda: [])
     for name in metrics.keys():
