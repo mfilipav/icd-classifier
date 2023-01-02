@@ -14,7 +14,7 @@ from tqdm import tqdm
 from collections import defaultdict
 import os  # need for args
 from icd_classifier.settings import MODEL_DIR
-from icd_classifier.data import utils
+from icd_classifier.data import data_utils
 from icd_classifier.modeling import tools, evaluation, interpret
 
 
@@ -41,7 +41,7 @@ def init(args):
 
     desc_embed = args.lmbda > 0
     logging.info("Loading lookups...")
-    dicts = utils.load_lookups(args, desc_embed=desc_embed)
+    dicts = data_utils.load_lookups(args, desc_embed=desc_embed)
 
     model = tools.pick_model(args, dicts)
     logging.info("Picked model: {}".format(model))
@@ -63,25 +63,26 @@ def init(args):
     return args, model, optimizer, params, dicts
 
 
-def early_stop(metrics_hist, criterion, patience):
-    if not np.all(np.isnan(metrics_hist[criterion])):
-        length = len(metrics_hist[criterion])
+def early_stop(metrics_hist, early_stopping_metric, patience):
+    if not np.all(np.isnan(metrics_hist[early_stopping_metric])):
+        length = len(metrics_hist[early_stopping_metric])
         if length >= patience:
             logging.info(
                 "check for early stop, because patience={} is exceeded with:"
-                " {}. Criterion={}".format(patience, length, criterion))
-            if criterion == 'loss_dev':
-                return np.nanargmin(metrics_hist[criterion]) < len(
-                        metrics_hist[criterion]) - patience
+                " {}. Criterion={}".format(
+                    patience, length, early_stopping_metric))
+            if early_stopping_metric == 'loss_dev':
+                return np.nanargmin(metrics_hist[early_stopping_metric]) < len(
+                        metrics_hist[early_stopping_metric]) - patience
             else:
-                return np.nanargmax(metrics_hist[criterion]) < len(
-                        metrics_hist[criterion]) - patience
+                return np.nanargmax(metrics_hist[early_stopping_metric]) < len(
+                        metrics_hist[early_stopping_metric]) - patience
     else:
-        # keep training if criterion results have all been nan so far
+        # keep training if early_stopping_metric has no results yet
         return False
 
 
-def train(model, optimizer, Y, epoch, batch_size, data_path,
+def train(model, optimizer, number_labels, epoch, batch_size, data_path,
           gpu, dicts, quiet):
     """
         Training loop.
@@ -99,7 +100,7 @@ def train(model, optimizer, Y, epoch, batch_size, data_path,
     desc_embed = model.lmbda > 0
 
     model.train()
-    gen = utils.data_generator(
+    gen = data_utils.data_generator(
         data_path, dicts, batch_size, num_labels, desc_embed=desc_embed)
 
     for batch_idx, tup in tqdm(enumerate(gen)):
@@ -127,19 +128,22 @@ def train(model, optimizer, Y, epoch, batch_size, data_path,
 
         if not quiet and batch_idx % print_every == 0:
             # print the average loss of the last 10 batches
-            print(" Train epoch: {} [batch #{}, batch_size {}, seq length {}]\tLoss: {:.6f}".format(
-                epoch, batch_idx, data.size()[0], data.size()[1], np.mean(losses[-10:])))
+            logging.info(
+                " Train epoch: {} [batch #{}, batch_size {}, seq length {}]\t"
+                "Loss: {:.6f}".format(
+                    epoch, batch_idx, data.size()[0],
+                    data.size()[1], np.mean(losses[-10:])))
     return losses, unseen_code_inds
 
 
-def one_epoch(model, optimizer, Y, epoch, n_epochs, batch_size, data_path,
-              testing, dicts, model_dir, samples, gpu, quiet):
+def one_epoch(model, optimizer, number_labels, epoch, n_epochs, batch_size,
+              data_path, testing, dicts, model_dir, samples, gpu, quiet):
     """
         Wrapper to do a training epoch and test on dev
     """
     if not testing:
         losses, unseen_code_inds = train(
-            model, optimizer, Y, epoch, batch_size,
+            model, optimizer, number_labels, epoch, batch_size,
             data_path, gpu, dicts, quiet)
         loss = np.mean(losses)
         logging.info("epoch {} loss: {}".format(epoch, loss))
@@ -176,12 +180,13 @@ def one_epoch(model, optimizer, Y, epoch, n_epochs, batch_size, data_path,
 
     # test on dev
     metrics = test(
-        model, Y, epoch, data_path, fold, gpu, unseen_code_inds,
+        model, number_labels, epoch, data_path, fold, gpu, unseen_code_inds,
         dicts, samples, model_dir, testing)
     if testing or epoch == n_epochs - 1:
         logging.info("Evaluating on test")
         metrics_te = test(
-            model, Y, epoch, data_path, "test", gpu, unseen_code_inds,
+            model, number_labels, epoch, data_path, "test",
+            gpu, unseen_code_inds,
             dicts, samples, model_dir, True)
     else:
         metrics_te = defaultdict(float)
@@ -209,7 +214,7 @@ def train_epochs(args, model, optimizer, params, dicts):
 
     test_only = args.test_model is not None
     evaluate = args.test_model is not None
-    # train for n_epochs unless criterion metric does
+    # train for n_epochs unless early_stopping_metric does
     # not improve for [patience] epochs
     for epoch in range(args.n_epochs):
         # only test on train/test set on very last epoch
@@ -226,8 +231,8 @@ def train_epochs(args, model, optimizer, params, dicts):
                 os.path.abspath(args.test_model))
         
         metrics_all = one_epoch(
-            model, optimizer, args.Y, epoch, args.n_epochs, args.batch_size,
-            args.data_path, test_only, dicts, model_dir,
+            model, optimizer, args.number_labels, epoch, args.n_epochs,
+            args.batch_size, args.data_path, test_only, dicts, model_dir,
             args.samples, args.gpu, args.quiet)
 
         for name in metrics_all[0].keys():
@@ -244,22 +249,23 @@ def train_epochs(args, model, optimizer, params, dicts):
         # save metrics, model, params
         tools.save_everything(
             args, metrics_hist_all, model, model_dir,
-            params, args.criterion, evaluate)
+            params, args.early_stopping_metric, evaluate)
 
         if test_only:
             # we're done
             break
 
-        if args.criterion in metrics_hist.keys():
-            if early_stop(metrics_hist, args.criterion, args.patience):
+        if args.early_stopping_metric in metrics_hist.keys():
+            if early_stop(
+                    metrics_hist, args.early_stopping_metric, args.patience):
                 # stop training, do tests on test and train sets,
                 # and then stop the script
                 logging.info(
                     "%s hasn't improved in %d epochs, early stopping..." % (
-                        args.criterion, args.patience))
+                        args.early_stopping_metric, args.patience))
                 test_only = True
                 args.test_model = '%s/model_best_%s.pth' % (
-                    model_dir, args.criterion)
+                    model_dir, args.early_stopping_metric)
                 model = tools.pick_model(args, dicts)
                 logging.info("Will test model: {}".format('model'))
     return epoch + 1
@@ -278,7 +284,7 @@ def unseen_code_vecs(model, code_inds, dicts, gpu):
     model.final.bias.data[code_inds] = 0
 
 
-def test(model, Y, epoch, data_path, fold, gpu, code_inds,
+def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
          dicts, samples, model_dir, testing):
     """
         Testing loop.
@@ -297,14 +303,17 @@ def test(model, Y, epoch, data_path, fold, gpu, code_inds,
         window_size = model.conv.weight.data.size()[2]
 
     y, yhat, yhat_raw, hids, losses = [], [], [], [], []
-    ind2w, w2ind, ind2c, c2ind = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind']
+    ind2w = dicts['ind2w']
+    w2ind = dicts['w2ind']
+    ind2c = dicts['ind2c']
+    c2ind = dicts['c2ind']
 
     desc_embed = model.lmbda > 0
     if desc_embed and len(code_inds) > 0:
         unseen_code_vecs(model, code_inds, dicts, gpu)
 
     model.eval()
-    one_batch = utils.data_generator(
+    one_batch = data_utils.data_generator(
         filename, dicts, 1, num_labels, desc_embed=desc_embed)
     for batch_idx, tup in tqdm(enumerate(one_batch)):
         data, target, hadm_ids, _, descs = tup
@@ -372,20 +381,32 @@ def test(model, Y, epoch, data_path, fold, gpu, code_inds,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="train a neural network on some clinical documents")
-    parser.add_argument("--data_path", type=str,
-                        help="path to a file containing sorted train data. dev/test splits assumed to have same name format with 'train' replaced by 'dev' and 'test'")
-    parser.add_argument("--vocab", type=str, help="path to a file holding vocab word list for discretizing words")
-    parser.add_argument("--Y", type=str, help="size of label space, full or 50")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data_path", type=str, help="path to a file "
+        "containing sorted train data. dev/test splits assumed to have same "
+        "name format with 'train' replaced by 'dev' and 'test'")
+    parser.add_argument(
+        "--vocab", type=str,
+        help="path to a file holding vocab word list for discretizing words")
+    parser.add_argument("--number_labels", type=str, help="size of label space, full or 50")
     parser.add_argument("--model", type=str, choices=["basic_cnn", "rnn", "conv_attn", "multi_conv_attn", "log_reg", "saved"], help="model")
     parser.add_argument("--n_epochs", type=int, help="number of epochs to train")
-    parser.add_argument("--embeddings-file", type=str, required=False, dest="embed_file",
+    parser.add_argument("--embeddings_file", type=str, required=False, dest="embed_file",
                         help="path to a file holding pre-trained embeddings")
+    parser.add_argument("--cell-type", type=str, choices=["lstm", "gru"], help="what kind of RNN to use (default: GRU)", dest='cell_type',
+                        default='gru')
+    parser.add_argument("--rnn-dim", type=int, required=False, dest="rnn_dim", default=128,
+                        help="size of rnn hidden layer (default: 128)")
+    parser.add_argument("--bidirectional", dest="bidirectional", action="store_const", required=False, const=True,
+                        help="optional flag for rnn to use a bidirectional model")
+    parser.add_argument("--rnn-layers", type=int, required=False, dest="rnn_layers", default=1,
+                        help="number of layers for RNN models (default: 1)")
     parser.add_argument("--embed-size", type=int, required=False, dest="embed_size", default=100,
                         help="size of embedding dimension. (default: 100)")
-    parser.add_argument("--filter-size", type=str, required=False, dest="filter_size", default=4,
+    parser.add_argument("--filter_size", type=str, required=False, dest="filter_size", default=4,
                         help="size of convolution filter to use. (default: 4) For multi_conv_attn, give comma separated integers, e.g. 3,4,5")
-    parser.add_argument("--num-filter-maps", type=int, required=False, dest="num_filter_maps", default=50,
+    parser.add_argument("--filter_maps", type=int, required=False, dest="num_filter_maps", default=50,
                         help="size of conv output (default: 50)")
     parser.add_argument("--pool", choices=['max', 'avg'], required=False, dest="pool", help="which type of pooling to do (log_reg model only)")
     parser.add_argument("--code-emb", type=str, required=False, dest="code_emb", 
@@ -401,10 +422,13 @@ if __name__ == "__main__":
     parser.add_argument("--lmbda", type=float, required=False, dest="lmbda", default=0,
                         help="hyperparameter to tradeoff BCE loss and similarity embedding loss. defaults to 0, which won't create/use the description embedding module at all. ")
     parser.add_argument("--test-model", type=str, dest="test_model", required=False, help="path to a saved model to load and evaluate")
-    parser.add_argument("--criterion", type=str, default='f1_micro', required=False, dest="criterion",
+    parser.add_argument("--early_stopping_metric", type=str, default='f1_micro', choices=[
+        'acc_macro', 'prec_macro', 'rec_macro', 'f1_macro', 'acc_micro',
+        'prec_micro', 'rec_micro', 'f1_micro', 'rec_at_5', 'prec_at_5', 'f1_at_5',
+        'auc_macro', 'auc_micro'], required=False, dest="early_stopping_metric",
                         help="which metric to use for early stopping (default: f1_micro)")
-    parser.add_argument("--patience", type=int, default=3, required=False, dest="patience",
-                        help="how many epochs to wait for improved criterion metric before early stopping (default: 3)")
+    parser.add_argument("--patience", type=int, default=5, required=False, dest="patience",
+                        help="how many epochs to wait for improved early_stopping_metric before early stopping (default: 3)")
     parser.add_argument("--gpu", dest="gpu", action="store_const", required=False, const=True,
                         help="optional flag to use GPU if available")
     parser.add_argument("--public-model", dest="public_model", action="store_const", required=False, const=True,

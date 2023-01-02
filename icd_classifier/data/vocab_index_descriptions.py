@@ -1,7 +1,7 @@
 """
     Pre-computes the vocab-indexed version of each code description
 """
-from data.utils import load_code_descriptions
+from icd_classifier.data.data_utils import load_code_descriptions
 from nltk.tokenize import RegexpTokenizer
 import csv
 from tqdm import tqdm

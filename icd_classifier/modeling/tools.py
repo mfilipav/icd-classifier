@@ -5,7 +5,7 @@ import numpy as np
 
 from icd_classifier.modeling import models
 from icd_classifier.settings import *
-from icd_classifier.data import utils
+from icd_classifier.data import data_utils
 import logging
 
 
@@ -13,31 +13,31 @@ def pick_model(args, dicts):
     """
         Use args to initialize the appropriate model
     """
-    Y = len(dicts['ind2c'])
+    number_labels = len(dicts['ind2c'])
     if args.model == "log_reg":
         model = models.LogReg(
-            Y, args.embed_file, args.lmbda, args.gpu, dicts, args.pool,
+            number_labels, args.embed_file, args.lmbda, args.gpu, dicts, args.pool,
             args.embed_size, args.dropout, args.code_emb)
 
     elif args.model == "basic_cnn":
         filter_size = int(args.filter_size)
         model = models.BasicCNN(
-            Y, args.embed_file, filter_size, args.num_filter_maps, args.gpu,
+            number_labels, args.embed_file, filter_size, args.num_filter_maps, args.gpu,
             dicts, args.embed_size, args.dropout)
 
     elif args.model == "rnn":
         logging.info(
-            type(Y), type(args.embed_file), type(dicts), type(args.rnn_dim),
+            type(number_labels), type(args.embed_file), type(dicts), type(args.rnn_dim),
             type(args.cell_type), type(args.rnn_layers), type(args.gpu),
             type(args.embed_size), type(args.bidirectional))
         model = models.VanillaRNN(
-            Y, args.embed_file, dicts, args.rnn_dim, args.cell_type,
+            number_labels, args.embed_file, dicts, args.rnn_dim, args.cell_type,
             args.rnn_layers, args.gpu, args.embed_size, args.bidirectional)
 
     elif args.model == "conv_attn":
         filter_size = int(args.filter_size)
         model = models.ConvAttnPool(
-            Y, args.embed_file, filter_size, args.num_filter_maps,
+            number_labels, args.embed_file, filter_size, args.num_filter_maps,
             args.lmbda, args.gpu, dicts, embed_size=args.embed_size,
             dropout=args.dropout, code_emb=args.code_emb)
 
@@ -60,13 +60,13 @@ def make_param_dict(args):
         Make a list of parameters to save for future reference
     """
     param_vals = [
-        args.Y, args.filter_size, args.dropout, args.num_filter_maps,
-        args.lmbda,
+        args.number_labels, args.filter_size, args.dropout, args.num_filter_maps,
+        args.rnn_dim, args.cell_type, args.rnn_layers, args.lmbda,
         args.command, args.weight_decay, args.data_path,
         args.vocab, args.embed_file, args.lr]
     param_names = [
-        "Y", "filter_size", "dropout", "num_filter_maps", 
-        "lmbda", "command",
+        "number_labels", "filter_size", "dropout", "num_filter_maps", "rnn_dim",
+        "cell_type", "rnn_layers", "lmbda", "command",
         "weight_decay", "data_path", "vocab", "embed_file", "lr"]
     params = {
         name: val for name, val in zip(
@@ -90,7 +90,7 @@ def build_code_vecs(code_inds, dicts):
             # vec is a single UNK if not in lookup
             vecs.append([len(ind2w) + 1])
     # pad everything
-    vecs = utils.pad_desc_vecs(vecs)
+    vecs = data_utils.pad_desc_vecs(vecs)
     return (torch.cuda.LongTensor(code_inds), vecs)
 
 
@@ -140,11 +140,14 @@ def write_preds(yhat, model_dir, hids, fold, ind2c, yhat_raw=None):
                     float(yhat_raw[i][idx]) for idx in top_idxs[:100]}
         with open(scores_file, 'w') as f:
             json.dump(scores, f, indent=1)
+
+    logging.info("Saving predictions as {}".format(preds_file))
+
     return preds_file
 
 
 def save_everything(args, metrics_hist_all, model, model_dir,
-                    params, criterion, evaluate=False):
+                    params, early_stopping_metric, evaluate=False):
     """
         Save metrics, model, params all in model_dir
     """
@@ -153,17 +156,17 @@ def save_everything(args, metrics_hist_all, model, model_dir,
     save_params_dict(params)
 
     if not evaluate:
-        # save the model with the best criterion metric
-        if not np.all(np.isnan(metrics_hist_all[0][criterion])):
-            if criterion == 'loss_dev': 
-                eval_val = np.nanargmin(metrics_hist_all[0][criterion])
+        # save the model with the best early_stopping_metric metric
+        if not np.all(np.isnan(metrics_hist_all[0][early_stopping_metric])):
+            if early_stopping_metric == 'loss_dev': 
+                eval_val = np.nanargmin(metrics_hist_all[0][early_stopping_metric])
             else:
-                eval_val = np.nanargmax(metrics_hist_all[0][criterion])
+                eval_val = np.nanargmax(metrics_hist_all[0][early_stopping_metric])
 
-            if eval_val == len(metrics_hist_all[0][criterion]) - 1:
+            if eval_val == len(metrics_hist_all[0][early_stopping_metric]) - 1:
                 # save state dict
                 sd = model.cpu().state_dict()
-                torch.save(sd, model_dir + "/model_best_%s.pth" % criterion)
+                torch.save(sd, model_dir + "/model_best_%s.pth" % early_stopping_metric)
                 if args.gpu:
                     model.cuda()
     print("saved metrics, params, model to directory %s\n" % (model_dir))

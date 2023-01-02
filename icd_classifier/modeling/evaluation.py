@@ -14,7 +14,7 @@ from sklearn.metrics import roc_curve, auc
 from tqdm import tqdm
 
 from icd_classifier.settings import MIMIC_3_DIR
-from icd_classifier.data import utils
+from icd_classifier.data import data_utils
 
 
 def all_metrics(yhat, y, k=8, yhat_raw=None, calc_auc=True):
@@ -385,7 +385,7 @@ if __name__ == "__main__":
             "usage: python " + str(os.path.basename(__file__) + " [train_dataset] [|Y| (as string)] [version (mimic2 or mimic3)] [model_dir]"))
         sys.exit(0)
     train_path, Y, version, mdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    ind2c, _ = utils.load_full_codes(train_path, version=version)
+    ind2c, _ = data_utils.load_full_codes(train_path, version=version)
 
     diag_preds, diag_golds, proc_preds, proc_golds, golds, preds, hadm_ids, type_dicts = results_by_type(Y, mdir, version)
     yhat, yhat_raw, y, metrics = metrics_from_dicts(preds, golds, mdir, ind2c)

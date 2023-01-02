@@ -18,7 +18,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC, LinearSVC
 from sklearn.linear_model import SGDClassifier
 from icd_classifier.settings import MODEL_DIR, DATA_DIR
-from icd_classifier.data import utils
+from icd_classifier.data import data_utils
 import evaluation
 from icd_classifier.modeling import tools
 
@@ -187,7 +187,7 @@ def calculate_top_ngrams(inputfile, clf, c2ind, w2ind,
                 # (num. labels, size vocab.)
                 # get row corresponding to label:
                 word_weights = mat_full[c2ind[label]]
-      
+
                 # get each set of n grams in text
                 # get ngrams
                 fourgrams = nltk.ngrams(text.split(), ngram)
@@ -205,12 +205,12 @@ def calculate_top_ngrams(inputfile, clf, c2ind, w2ind,
                             # else if word not in vocab, adds 0 weight
                             pass
                     fourgrams_scores.append(sum_weights)
-                 
+
                 # get the fourgram itself
                 w = [word for word in text.split()][
                     fourgrams_scores.index(max(fourgrams_scores)):
                     fourgrams_scores.index(max(fourgrams_scores))+ngram]
-                    
+
                 # label
                 myList.append(label)
                 # start index of 4-gram
@@ -229,17 +229,17 @@ def calculate_top_ngrams(inputfile, clf, c2ind, w2ind,
 def main(args):
 
     # STEP 1: DATA PREPARATION
-    
+
     # to handle large csv files
     csv.field_size_limit(sys.maxsize)
-    if args.Y == '50':
-        args.Y = 50
+    if args.number_labels == '50':
+        args.number_labels = 50
     train_bows_file = args.train_file.split('.csv')[0] + '_bows.csv'
     dev_bows_file = args.dev_file.split('.csv')[0] + '_bows.csv'
-    
+
     logging.info("Start log reg with BOW document representation")
 
-    dicts = utils.load_lookups(args)
+    dicts = data_utils.load_lookups(args)
     # w2ind: length 51917, {'000cc': 1, '000mcg': 2, '000mg': 3, '000s': 4, ..
     # 'conronary': 12656, 'cons': 12657, 'consciosness': 12658,..
 
@@ -255,11 +255,12 @@ def main(args):
 
     if not os.path.isfile(train_bows_file):
 
-        # outputs: csr_matrix((data, indices, subj_inds)), np.array(yy), hadm_ids
+        # outputs:
+        #   csr_matrix((data, indices, subj_inds)), np.array(yy), hadm_ids
         X, y, hadm_ids = construct_X_Y(
-            args.train_file, args.Y, w2ind, c2ind)
+            args.train_file, args.number_labels, w2ind, c2ind)
         X_dv, y_dv, hadm_ids_dv = construct_X_Y(
-            args.dev_file, args.Y, w2ind, c2ind)
+            args.dev_file, args.number_labels, w2ind, c2ind)
 
         # write out
         write_bows(train_bows_file, X, hadm_ids, y, ind2c)
@@ -343,7 +344,8 @@ def main(args):
         yhat_raw = clf.predict_proba(X_dv)
     else:
         yhat_raw = yhat
-    logging.info("Predicting on dev set. Example from yhat: {}".format(yhat[0]))
+    logging.info(
+        "Predicting on dev set. Example from yhat: {}".format(yhat[0]))
 
     # deal with labels that don't have positive training examples
     logging.info("Reshaping output to deal with labels missing from train set")
@@ -360,11 +362,12 @@ def main(args):
     # evaluate
     # Precision@5 for top 50 labels experiment; @8/15 for 'full'
     logging.info("Evaluating on dev set...")
-    k = 5 if args.Y == 50 else [8, 15]
+    k = 5 if args.number_labels == 50 else [8, 15]
 
     # only Logistic Regression and SCV provide probabilities
+    # try to put yhat_full_raw to nothing or yhat_full
     if any([not model == 'svc', not model == 'log_reg']):
-        yhat_full_raw = None
+        yhat_full_raw = yhat_full
     metrics = evaluation.all_metrics(
         yhat_full, yy_dv, k=k, yhat_raw=yhat_full_raw)
 

@@ -230,7 +230,7 @@ def load_vocab_dict(args, vocab_file):
             if line != '':
                 vocab.add(line.strip())
     # hack because the vocabs were created differently for these models
-    if all([args.Y == 'full', public_model, args.model == 'conv_attn']):
+    if all([args.number_labels == 'full', public_model, args.model == 'conv_attn']):
         ind2w = {i: w for i, w in enumerate(sorted(vocab))}
     else:
         ind2w = {i + 1: w for i, w in enumerate(sorted(vocab))}
@@ -250,13 +250,13 @@ def load_lookups(args, desc_embed=False):
     ind2w, w2ind = load_vocab_dict(args, args.vocab)
 
     # get code and description lookups
-    if args.Y == 'full':
+    if args.number_labels == 'full':
         ind2c, desc_dict = load_full_codes(args.data_path)
     else:
         codes = set()
         with open(
             "%s/TOP_%s_CODES.csv" % (
-                MIMIC_3_DIR, str(args.Y)), 'r') as labelfile:
+                MIMIC_3_DIR, str(args.number_labels)), 'r') as labelfile:
             lr = csv.reader(labelfile)
             for i, row in enumerate(lr):
                 codes.add(row[0])
@@ -266,7 +266,7 @@ def load_lookups(args, desc_embed=False):
 
     # get description one-hot vector lookup
     if desc_embed:
-        dv_dict = load_description_vectors(args.Y)
+        dv_dict = load_description_vectors(args.number_labels)
     else:
         dv_dict = None
 

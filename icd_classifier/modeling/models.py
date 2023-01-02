@@ -8,18 +8,17 @@ from torch.autograd import Variable
 import numpy as np
 import logging
 from icd_classifier.data import extract_wvs
-from icd_classifier.settings import MIMIC_3_DIR
 
 
 class BaseModel(nn.Module):
 
     def __init__(
-            self, Y, embed_file, dicts, lmbda=0,
+            self, number_labels, embed_file, dicts, lmbda=0,
             dropout=0.5, gpu=True, embed_size=100):
         super(BaseModel, self).__init__()
         torch.manual_seed(1337)
         self.gpu = gpu
-        self.Y = Y
+        self.number_labels = number_labels
         self.embed_size = embed_size
         # TODO: do we really need embedding dropout?
         self.embed_drop = nn.Dropout(p=dropout)
@@ -117,14 +116,14 @@ class LogReg(BaseModel):
     """
 
     def __init__(
-            self, Y, embed_file, lmbda, gpu, dicts,
+            self, number_labels, embed_file, lmbda, gpu, dicts,
             pool='max', embed_size=100, dropout=0.5, code_emb=None):
         super(LogReg, self).__init__(
-            Y, embed_file, dicts, lmbda,
+            number_labels, embed_file, dicts, lmbda,
             dropout=dropout, gpu=gpu, embed_size=embed_size)
-        self.final = nn.Linear(embed_size, Y)
+        self.final = nn.Linear(embed_size, number_labels)
         # for nn.Linear see https://pytorch.org/.../torch.nn.Linear
-        # the embed_size and Y define the weight matrix size.
+        # the embed_size and number_labels define the weight matrix size.
         if code_emb:
             self._code_emb_init(code_emb, dicts)
         else:
@@ -140,7 +139,7 @@ class LogReg(BaseModel):
         # Load the input-hidden weight matrix from the original
         #   C word2vec-tool format.
         weights = np.zeros(self.final.weight.size())
-        for i in range(self.Y):
+        for i in range(self.number_labels):
             code = dicts['ind2c'][i]
             weights[i] = code_embs[code]
         # set weight as the code embeddings.
@@ -175,10 +174,10 @@ class LogReg(BaseModel):
 
 class BasicCNN(BaseModel):
 
-    def __init__(self, Y, embed_file, kernel_size, num_filter_maps, gpu=True,
+    def __init__(self, number_labels, embed_file, kernel_size, num_filter_maps, gpu=True,
                  dicts=None, embed_size=100, dropout=0.5):
         super(BasicCNN, self).__init__(
-            Y, embed_file, dicts, dropout=dropout, embed_size=embed_size)
+            number_labels, embed_file, dicts, dropout=dropout, embed_size=embed_size)
         # initialize conv layer as in 2.1
         self.conv = nn.Conv1d(
             in_channels=self.embed_size, out_channels=num_filter_maps,
@@ -186,7 +185,7 @@ class BasicCNN(BaseModel):
         xavier_uniform(tensor=self.conv.weight)
 
         # linear output
-        self.fc = nn.Linear(in_features=num_filter_maps, out_features=Y)
+        self.fc = nn.Linear(in_features=num_filter_maps, out_features=number_labels)
         xavier_uniform(tensor=self.fc.weight)
         logging.info("Done initializing vanilla CNN")
 
@@ -223,16 +222,16 @@ class BasicCNN(BaseModel):
             for i in range(num_windows):
                 # generate mask to select indices of conv features
                 # where max was i
-                mask = (argmax_i == i).repeat(1, self.Y).t()
+                mask = (argmax_i == i).repeat(1, self.number_labels).t()
                 # apply mask to every label's weight vector and take the sum
                 # to get the 'attention' score
-                weights = self.fc.weight[mask].view(-1, self.Y)
+                weights = self.fc.weight[mask].view(-1, self.number_labels)
                 if len(weights.size()) > 0:
                     window_attns = weights.sum(dim=0)
                     attns.append(window_attns)
                 else:
                     # this window was never a max
-                    attns.append(Variable(torch.zeros(self.Y)).cuda())
+                    attns.append(Variable(torch.zeros(self.number_labels)).cuda())
             # combine
             attn = torch.stack(attns)
             attn_batches.append(attn)
