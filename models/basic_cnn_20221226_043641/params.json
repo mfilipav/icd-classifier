@@ -7,7 +7,7 @@
  "cell_type": "gru",
  "rnn_layers": 1,
  "lmbda": 0,
- "command": "python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model basic_cnn --n_epochs 100 --filter-size 4 --num-filter-maps 50 --dropout 0.2 --lr 0.003 --embeddings-file data/processed/processed_full.embed --gpu",
+ "command": "python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model basic_cnn --n_epochs 100 --filter_size 4 --filter_maps 50 --dropout 0.2 --lr 0.003 --embeddings_file data/processed/processed_full.embed --gpu",
  "weight_decay": 0,
  "data_path": "data/processed/train_50.csv",
  "vocab": "data/processed/vocab.csv",

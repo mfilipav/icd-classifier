@@ -1,5 +1,6 @@
 """
-    Main training code. Loads data, builds the model, trains, tests, evaluates, writes outputs, etc.
+    Main training code. Loads data, builds the model, trains, tests,
+    evaluates with many metrics, saves predictions
 """
 import torch
 import torch.optim as optim
@@ -39,9 +40,11 @@ def init(args):
     # load vocab and other lookups
     logging.info("Initialize with ARGS: {}".format(args))
 
-    desc_embed = args.lmbda > 0
     logging.info("Loading lookups...")
-    dicts = data_utils.load_lookups(args, desc_embed=desc_embed)
+    desc_embed = args.lmbda > 0
+    dicts = data_utils.load_lookups(
+        args.data_path, args.model, args.number_labels, args.vocab,
+        args.public_model, desc_embed=desc_embed)
 
     model = tools.pick_model(args, dicts)
     logging.info("Picked model: {}".format(model))
@@ -59,7 +62,7 @@ def init(args):
         optimizer = None
 
     params = tools.make_param_dict(args)
-   
+
     return args, model, optimizer, params, dicts
 
 
@@ -95,7 +98,7 @@ def train(model, optimizer, number_labels, epoch, batch_size, data_path,
     # how often to print some info to stdout
     print_every = 25
 
-    ind2w, w2ind, ind2c, c2ind = dicts['ind2w'], dicts['w2ind'], dicts['ind2c'], dicts['c2ind']
+    ind2c = dicts['ind2c']
     unseen_code_inds = set(ind2c.keys())
     desc_embed = model.lmbda > 0
 
@@ -137,7 +140,8 @@ def train(model, optimizer, number_labels, epoch, batch_size, data_path,
 
 
 def one_epoch(model, optimizer, number_labels, epoch, n_epochs, batch_size,
-              data_path, testing, dicts, model_dir, samples, gpu, quiet):
+              data_path, testing, dicts, model_dir,
+              save_tp_fp_examples, gpu, quiet):
     """
         Wrapper to do a training epoch and test on dev
     """
@@ -181,17 +185,16 @@ def one_epoch(model, optimizer, number_labels, epoch, n_epochs, batch_size,
     # test on dev
     metrics = test(
         model, number_labels, epoch, data_path, fold, gpu, unseen_code_inds,
-        dicts, samples, model_dir, testing)
+        dicts, save_tp_fp_examples, model_dir, testing)
     if testing or epoch == n_epochs - 1:
         logging.info("Evaluating on test")
         metrics_te = test(
             model, number_labels, epoch, data_path, "test",
             gpu, unseen_code_inds,
-            dicts, samples, model_dir, True)
+            dicts, save_tp_fp_examples, model_dir, True)
     else:
         metrics_te = defaultdict(float)
-        fpr_te = defaultdict(lambda: [])
-        tpr_te = defaultdict(lambda: [])
+
     metrics_tr = {'loss': loss}
     metrics_all = (metrics, metrics_te, metrics_tr)
     logging.info("Training metrics: {}".format(metrics_tr))
@@ -229,21 +232,21 @@ def train_epochs(args, model, optimizer, params, dicts):
         elif args.test_model:
             model_dir = os.path.dirname(
                 os.path.abspath(args.test_model))
-        
+
         metrics_all = one_epoch(
             model, optimizer, args.number_labels, epoch, args.n_epochs,
             args.batch_size, args.data_path, test_only, dicts, model_dir,
-            args.samples, args.gpu, args.quiet)
+            args.save_tp_fp_examples, args.gpu, args.quiet)
 
         for name in metrics_all[0].keys():
             metrics_hist[name].append(metrics_all[0][name])
-        
+
         for name in metrics_all[1].keys():
             metrics_hist_te[name].append(metrics_all[1][name])
-        
+
         for name in metrics_all[2].keys():
             metrics_hist_tr[name].append(metrics_all[2][name])
-        
+
         metrics_hist_all = (metrics_hist, metrics_hist_te, metrics_hist_tr)
 
         # save metrics, model, params
@@ -285,7 +288,7 @@ def unseen_code_vecs(model, code_inds, dicts, gpu):
 
 
 def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
-         dicts, samples, model_dir, testing):
+         dicts, save_tp_fp_examples, model_dir, testing):
     """
         Testing loop.
         Returns metrics
@@ -293,9 +296,10 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
     filename = data_path.replace('train', fold)
     logging.info('Testing file: %s' % filename)
     num_labels = len(dicts['ind2c'])
+    ind2c = dicts['ind2c']
 
     # initialize stuff for saving attention samples
-    if samples:
+    if save_tp_fp_examples:
         tp_file = open(
             '%s/tp_%s_examples_%d.txt' % (model_dir, fold, epoch), 'w')
         fp_file = open(
@@ -303,10 +307,6 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         window_size = model.conv.weight.data.size()[2]
 
     y, yhat, yhat_raw, hids, losses = [], [], [], [], []
-    ind2w = dicts['ind2w']
-    w2ind = dicts['w2ind']
-    ind2c = dicts['ind2c']
-    c2ind = dicts['c2ind']
 
     desc_embed = model.lmbda > 0
     if desc_embed and len(code_inds) > 0:
@@ -321,7 +321,7 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         # Variable(torch.FloatTensor(target))
         # TODO: do we need to use torch.no_grad()??
         data, target = torch.LongTensor(data), torch.FloatTensor(target)
-        
+
         if gpu:
             data = data.cuda()
             target = target.cuda()
@@ -333,7 +333,7 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
             desc_data = None
 
         # get an attention sample for 2% of batches
-        get_attn = samples and (
+        get_attn = save_tp_fp_examples and (
             np.random.rand() < 0.02 or (fold == 'test' and testing))
         output, loss, alpha = model(
             data, target, desc_data=desc_data, get_attention=get_attn)
@@ -344,7 +344,7 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         # losses.append(loss.data[0])
         losses.append(loss.data.item())
         target_data = target.data.cpu().numpy()
-        if get_attn and samples:
+        if get_attn and save_tp_fp_examples:
             interpret.save_samples(
                 data, output, target_data, alpha, window_size,
                 epoch, tp_file, fp_file, dicts=dicts)
@@ -357,7 +357,7 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         hids.extend(hadm_ids)
 
     # close files if needed
-    if samples:
+    if save_tp_fp_examples:
         tp_file.close()
         fp_file.close()
 
@@ -389,58 +389,93 @@ if __name__ == "__main__":
     parser.add_argument(
         "--vocab", type=str,
         help="path to a file holding vocab word list for discretizing words")
-    parser.add_argument("--number_labels", type=str, help="size of label space, full or 50")
-    parser.add_argument("--model", type=str, choices=["basic_cnn", "rnn", "conv_attn", "multi_conv_attn", "log_reg", "saved"], help="model")
-    parser.add_argument("--n_epochs", type=int, help="number of epochs to train")
-    parser.add_argument("--embeddings_file", type=str, required=False, dest="embed_file",
-                        help="path to a file holding pre-trained embeddings")
-    parser.add_argument("--cell-type", type=str, choices=["lstm", "gru"], help="what kind of RNN to use (default: GRU)", dest='cell_type',
-                        default='gru')
-    parser.add_argument("--rnn-dim", type=int, required=False, dest="rnn_dim", default=128,
-                        help="size of rnn hidden layer (default: 128)")
-    parser.add_argument("--bidirectional", dest="bidirectional", action="store_const", required=False, const=True,
-                        help="optional flag for rnn to use a bidirectional model")
-    parser.add_argument("--rnn-layers", type=int, required=False, dest="rnn_layers", default=1,
-                        help="number of layers for RNN models (default: 1)")
-    parser.add_argument("--embed-size", type=int, required=False, dest="embed_size", default=100,
-                        help="size of embedding dimension. (default: 100)")
-    parser.add_argument("--filter_size", type=str, required=False, dest="filter_size", default=4,
-                        help="size of convolution filter to use. (default: 4) For multi_conv_attn, give comma separated integers, e.g. 3,4,5")
-    parser.add_argument("--filter_maps", type=int, required=False, dest="num_filter_maps", default=50,
-                        help="size of conv output (default: 50)")
-    parser.add_argument("--pool", choices=['max', 'avg'], required=False, dest="pool", help="which type of pooling to do (log_reg model only)")
-    parser.add_argument("--code-emb", type=str, required=False, dest="code_emb", 
-                        help="point to code embeddings to use for parameter initialization, if applicable")
-    parser.add_argument("--weight-decay", type=float, required=False, dest="weight_decay", default=0,
-                        help="coefficient for penalizing l2 norm of model weights (default: 0)")
-    parser.add_argument("--lr", type=float, required=False, dest="lr", default=1e-3,
-                        help="learning rate for Adam optimizer (default=1e-3)")
-    parser.add_argument("--batch-size", type=int, required=False, dest="batch_size", default=16,
-                        help="size of training batches")
-    parser.add_argument("--dropout", dest="dropout", type=float, required=False, default=0.5,
-                        help="optional specification of dropout (default: 0.5)")
-    parser.add_argument("--lmbda", type=float, required=False, dest="lmbda", default=0,
-                        help="hyperparameter to tradeoff BCE loss and similarity embedding loss. defaults to 0, which won't create/use the description embedding module at all. ")
-    parser.add_argument("--test-model", type=str, dest="test_model", required=False, help="path to a saved model to load and evaluate")
-    parser.add_argument("--early_stopping_metric", type=str, default='f1_micro', choices=[
-        'acc_macro', 'prec_macro', 'rec_macro', 'f1_macro', 'acc_micro',
-        'prec_micro', 'rec_micro', 'f1_micro', 'rec_at_5', 'prec_at_5', 'f1_at_5',
-        'auc_macro', 'auc_micro'], required=False, dest="early_stopping_metric",
-                        help="which metric to use for early stopping (default: f1_micro)")
-    parser.add_argument("--patience", type=int, default=5, required=False, dest="patience",
-                        help="how many epochs to wait for improved early_stopping_metric before early stopping (default: 3)")
-    parser.add_argument("--gpu", dest="gpu", action="store_const", required=False, const=True,
-                        help="optional flag to use GPU if available")
-    parser.add_argument("--public-model", dest="public_model", action="store_const", required=False, const=True,
-                        help="optional flag for testing pre-trained models from the public github")
-    parser.add_argument("--stack-filters", dest="stack_filters", action="store_const", required=False, const=True,
-                        help="optional flag for multi_conv_attn to instead use concatenated filter outputs, rather than pooling over them")
-    parser.add_argument("--samples", dest="samples", action="store_const", required=False, const=True,
-                        help="optional flag to save samples of good / bad predictions")
-    parser.add_argument("--quiet", dest="quiet", action="store_const", required=False, const=True,
-                        help="optional flag not to print so much during training")
+    parser.add_argument(
+        "--number_labels", type=str,
+        help="size of label space, full or 50")
+    parser.add_argument(
+        "--model", type=str,
+        choices=["basic_cnn", "rnn", "conv_attn", "multi_conv_attn",
+                 "log_reg", "saved"],
+        help="model")
+    parser.add_argument(
+        "--n_epochs", type=int, help="number of epochs to train")
+    parser.add_argument(
+        "--embeddings_file", type=str, required=False,
+        help="path to a file holding pre-trained embeddings")
+    parser.add_argument(
+        "--rnn_cell_type", type=str, choices=["lstm", "gru"], default='gru',
+        help="what kind of RNN to use (default: GRU)")
+    parser.add_argument(
+        "--rnn_dim", type=int, required=False, default=128,
+        help="size of rnn hidden layer (default: 128)")
+    parser.add_argument(
+        "--rnn_bidirectional", dest="bidirectional", action="store_true",
+        required=False, default=False,
+        help="optional flag for rnn to use a bidirectional model")
+    parser.add_argument(
+        "--rnn_layers", type=int, required=False, default=1,
+        help="number of layers for RNN models (default: 1)")
+    parser.add_argument(
+        "--embedding_size", type=int, required=False, default=100,
+        help="size of embedding dimension. (default: 100)")
+    parser.add_argument(
+        "--filter_size", type=str, required=False, dest="filter_size",
+        default=4, help="size of convolution filter to use, if multi_conv_attn"
+                        ", give comma-separated e.g. 3,4,5")
+    parser.add_argument(
+        "--filter_maps", type=int, required=False, default=50,
+        help="number of maps, i.e, size of conv output (default: 50)")
+    parser.add_argument(
+        "--codes_embeddings", type=str, required=False,
+        help="code embeddings file used for param initialization")
+    parser.add_argument(
+        "--weight_decay", type=float, required=False, default=0,
+        help="coeff for l2 norm of model weights")
+    parser.add_argument(
+        "--lr", type=float, required=False, dest="lr", default=1e-3,
+        help="learning rate for Adam optimizer (default=1e-3)")
+    parser.add_argument("--batch_size", type=int, required=False, default=16,
+                        help="number of examples per training batch")
+    parser.add_argument(
+        "--dropout", dest="dropout", type=float, required=False, default=0.5,
+        help="optional specification of dropout (default: 0.5)")
+    parser.add_argument(
+        "--lmbda", type=float, required=False, default=0,
+        help="param for tradeoff between BCE and similarity embedding losses, "
+             "if 0, won't create/use the description embedding module at all")
+    parser.add_argument(
+        "--test_model", type=str, dest="test_model", required=False,
+        help="path to a saved model to load and evaluate")
+    parser.add_argument(
+        "--early_stopping_metric", type=str, default='f1_micro', choices=[
+            'acc_macro', 'prec_macro', 'rec_macro', 'f1_macro', 'acc_micro',
+            'prec_micro', 'rec_micro', 'f1_micro', 'rec_at_5', 'prec_at_5',
+            'f1_at_5', 'auc_macro', 'auc_micro'],
+        required=False, dest="early_stopping_metric",
+        help="which metric to use for early stopping (default: f1_micro)")
+    parser.add_argument(
+        "--patience", type=int, default=5, required=False, dest="patience",
+        help="how many epochs to wait for improved early_stopping_metric "
+             "before early stopping")
+    parser.add_argument(
+        "--gpu", dest="gpu", action="store_const", required=False, const=True,
+        help="optional flag to use GPU if available")
+    parser.add_argument(
+        "--public_model", action="store_const", required=False, const=True,
+        default=False, help="optional flag for testing pre-trained models "
+                            "from the public github")
+    parser.add_argument(
+        "--stack_filters", action="store_const", required=False, const=True,
+        help="optional flag for multi_conv_attn to instead use concatenated "
+             "filter outputs, rather than pooling over them")
+    parser.add_argument(
+        "--save_tp_fp_examples", required=False, const=True,
+        help="optional flag to save samples of good / bad predictions")
+    parser.add_argument(
+        "--quiet", action="store_const", required=False, const=True,
+        help="optional flag not to print so much during training")
+
     args = parser.parse_args()
     command = ' '.join(['python'] + sys.argv)
     args.command = command
     main(args)
-

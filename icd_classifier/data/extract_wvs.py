@@ -73,10 +73,10 @@ def save_embeddings(W, words, outfile):
             "Total words: {} ".format(outfile, len(W), len(words)))
 
 
-def load_embeddings(embed_file):
+def load_embeddings(embeddings_file):
     # also normalizes the embeddings
     W = []
-    with open(embed_file) as ef:
+    with open(embeddings_file) as ef:
         for line in ef:
             line = line.rstrip().split()
             vec = np.array(line[1:]).astype(np.float)

@@ -235,11 +235,12 @@ def main(args):
     if args.number_labels == '50':
         args.number_labels = 50
     train_bows_file = args.train_file.split('.csv')[0] + '_bows.csv'
-    dev_bows_file = args.dev_file.split('.csv')[0] + '_bows.csv'
+    dev_bows_file = args.test_file.split('.csv')[0] + '_bows.csv'
 
     logging.info("Start log reg with BOW document representation")
 
-    dicts = data_utils.load_lookups(args)
+    dicts = data_utils.load_lookups(
+        args.train_file, args.model, args.number_labels, args.vocab)
     # w2ind: length 51917, {'000cc': 1, '000mcg': 2, '000mg': 3, '000s': 4, ..
     # 'conronary': 12656, 'cons': 12657, 'consciosness': 12658,..
 
@@ -260,7 +261,7 @@ def main(args):
         X, y, hadm_ids = construct_X_Y(
             args.train_file, args.number_labels, w2ind, c2ind)
         X_dv, y_dv, hadm_ids_dv = construct_X_Y(
-            args.dev_file, args.number_labels, w2ind, c2ind)
+            args.test_file, args.number_labels, w2ind, c2ind)
 
         # write out
         write_bows(train_bows_file, X, hadm_ids, y, ind2c)
@@ -307,7 +308,7 @@ def main(args):
         # try solver=newton-cholesky, class_weight='balanced'
         clf = OneVsRestClassifier(LogisticRegression(
                 C=args.c, max_iter=args.max_iter, penalty='l2', dual=False,
-                solver='sag', multiclass='ovr', class_weight='balanced',
+                solver='sag', class_weight='balanced',
                 verbose=True, n_jobs=-1), n_jobs=-1)
     elif model == 'svc':
         logging.info("Building RBF SVC classifier with probabilities")
@@ -439,9 +440,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=str, help="path to a file ")
-    parser.add_argument("--train_file", type=str, help="path to a file ")
-    parser.add_argument("--dev_file", type=str, help="path to a file ")
+    parser.add_argument(
+        "--train_file", type=str, help="path to the training file")
+    parser.add_argument(
+        "--test_file", type=str,
+        help="path to a dev/test file")
     parser.add_argument(
         "--vocab", type=str,
         help="path to a file holding vocab word list for discretizing words")
@@ -449,7 +452,8 @@ if __name__ == "__main__":
         "--model", type=str, default='log_reg',
         help="model name is log reg, just for record keeping")
     parser.add_argument(
-        "--Y", type=str, help="size of label space, 'full' or '50'")
+        "--number_labels", type=str,
+        help="size of label space, 'full' or '50'")
     parser.add_argument("--ngram", type=int, default=0, help="size if ngrams")
     parser.add_argument(
         "--c", type=float, default=1.0, help="log reg parameter C")
