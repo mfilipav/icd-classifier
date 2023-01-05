@@ -54,5 +54,9 @@ CNN
 - basic
 - no attention mechanism yet
 ```
-python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model basic_cnn --n_epochs 100 --filter_size 4 --filter_maps 500 --dropout 0.2 --lr 0.003 --embeddings_file data/processed/processed_full.embed --gpu
+python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model basic_cnn --n_epochs 100 --filter_size 4 --filter_maps 500 --dropout 0.2 --lr 0.003 --embeddings_file data/processed/processed_full.embed --gpu```
+
+RNN
+```
+python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model rnn --n_epochs 100 --dropout 0 --lr 0.003 --rnn_dim 100 --rnn_cell_type gru --rnn_layers 1 --embeddings_file data/processed/processed_full.embed --early_stopping_metric prec_at_5 --gpu
 ```

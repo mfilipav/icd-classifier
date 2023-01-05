@@ -100,65 +100,80 @@ def pad_desc_vecs(desc_vecs):
 
 class Batch:
     """
-        This class and the data_generator could probably
-        be replaced with a PyTorch DataLoader
+    Prepares a batch of data. Numpy arrays for each data row with text
+    (idx of word tokens), labels (multi-hot-encoded label indices), hadmis
+    Size of Batch is 16 by default
+
+    Returns:
+        docs: list of len batch_size, contains idxs of word tokens,
+            padded to max sequence length in batch or `MAX_LENGTH`
+        labels: multihot-encoded labels (ICD-9 code)
+        label_idx_set: set of label indices that are found in the batch
     """
     def __init__(self, desc_embed):
         self.docs = []
         self.labels = []
         self.hadm_ids = []
-        self.code_set = set()
+        self.label_idx_set = set()
         self.length = 0
         self.max_length = MAX_LENGTH
         self.desc_embed = desc_embed
         self.descs = []
 
-    def add_instance(self, row, ind2c, c2ind, w2ind, dv_dict, num_labels):
+    def add_example_to_batch(
+            self, row, ind2c, c2ind, w2ind, dv_dict, num_labels):
         """
             Makes an instance to add to this batch from given row data,
             with a bunch of lookups
+            row-derived: text, hadm_id, length
         """
-        hadm_id = int(row[1])
         text = row[2]
+        hadm_id = int(row[1])
         length = int(row[4])
-        cur_code_set = set()
+        current_label_idx_set = set()
+        # will store labels' indices
         labels_idx = np.zeros(num_labels)
         labelled = False
-        desc_vecs = []
+
         # get codes as a multi-hot vector
-        for label in row[3].split(';'):
-            if label in c2ind.keys():
-                code = int(c2ind[label])
-                labels_idx[code] = 1
-                cur_code_set.add(code)
+        # row[3]: 287.5;45.13;584.9
+        for code in row[3].split(';'):
+            if code in c2ind.keys():
+                label_idx = int(c2ind[code])
+                labels_idx[label_idx] = 1
+                current_label_idx_set.add(label_idx)
                 labelled = True
         if not labelled:
             return
+
+        desc_vecs = []
         if self.desc_embed:
-            for code in cur_code_set:
-                label = ind2c[code]
-                if label in dv_dict.keys():
+            for idx in current_label_idx_set:
+                code = ind2c[idx]
+                if code in dv_dict.keys():
                     # need to copy or description padding will get screwed up
-                    desc_vecs.append(dv_dict[label][:])
+                    desc_vecs.append(dv_dict[code][:])
                 else:
                     desc_vecs.append([len(w2ind)+1])
+
         # OOV words are given a unique index at end of vocab lookup
         text = [
             int(w2ind[w]) if w in w2ind else len(w2ind)+1 for w in text.split()
         ]
+
         # truncate long documents
         if len(text) > self.max_length:
             text = text[:self.max_length]
+        # reset length
+        self.length = min(self.max_length, length)
 
         # build instance
         self.docs.append(text)
         self.labels.append(labels_idx)
         self.hadm_ids.append(hadm_id)
-        self.code_set = self.code_set.union(cur_code_set)
+        self.label_idx_set = self.label_idx_set.union(current_label_idx_set)
         if self.desc_embed:
             self.descs.append(pad_desc_vecs(desc_vecs))
-        # reset length
-        self.length = min(self.max_length, length)
 
     def pad_docs(self):
         # pad all docs to have self.length
@@ -169,26 +184,31 @@ class Batch:
             padded_docs.append(doc)
         self.docs = padded_docs
 
-    def to_ret(self):
+    def to_return(self):
+        # logging.debug(
+        #     "hadm_ids: {}, len of one padded doc: {}, self labels: {}, "
+        #     "label_idx_set: {}".format(
+        #         self.hadm_ids, len(self.docs[0]),
+        #         self.labels[0], self.label_idx_set))
         return np.array(self.docs), np.array(self.labels),\
-            np.array(self.hadm_ids), self.code_set, np.array(self.descs)
+            np.array(self.hadm_ids), self.label_idx_set, np.array(self.descs)
 
 
 def data_generator(filename, dicts, batch_size, num_labels, desc_embed=False):
     """
         Inputs:
-            filename: holds data sorted by sequence length, for best batching
+            filename: holds data sorted by sequence length, for batching
             dicts: holds all needed lookups
             batch_size: the batch size for train iterations
             num_labels: size of label output space
             desc_embed: true if using DR-CAML (lambda > 0)
         Yields:
-            np arrays with data for training loop.
+            np arrays with data for training loop, see add_example_to_batch()
     """
-    logging.debug(
-        "Creating batch of np arrays with sorted-by-length data for "
-        "training loop; data source: {}, batch size: {}, "
-        "label space: {}".format(filename, batch_size, num_labels))
+    # logging.debug(
+    #     "Create batch with {} np arrays with sorted-by-length data for "
+    #     "training loop; data source: {} label space: {}".format(
+    #         batch_size, filename, num_labels))
 
     # ind2w = dicts['ind2w']
     w2ind = dicts['w2ind']
@@ -196,21 +216,22 @@ def data_generator(filename, dicts, batch_size, num_labels, desc_embed=False):
     c2ind = dicts['c2ind']
     dv_dict = dicts['dv']
     with open(filename, 'r') as infile:
-        r = csv.reader(infile)
+        csv_reader = csv.reader(infile)
         # header
-        next(r)
-        cur_inst = Batch(desc_embed)
-        for row in r:
+        next(csv_reader)
+        batch = Batch(desc_embed)
+        for row in csv_reader:
             # find the next `batch_size` instances
-            if len(cur_inst.docs) == batch_size:
-                cur_inst.pad_docs()
-                yield cur_inst.to_ret()
-                # clear
-                cur_inst = Batch(desc_embed)
-            cur_inst.add_instance(
+            if len(batch.docs) == batch_size:
+                batch.pad_docs()
+                yield batch.to_return()
+                # re-initialize the batch
+                batch = Batch(desc_embed)
+            # keep adding instance
+            batch.add_example_to_batch(
                 row, ind2c, c2ind, w2ind, dv_dict, num_labels)
-        cur_inst.pad_docs()
-        yield cur_inst.to_ret()
+        batch.pad_docs()
+        yield batch.to_return()
 
 
 def load_vocab_dict(model, number_labels, vocab_file, public_model=False):

@@ -103,17 +103,17 @@ def train(model, optimizer, number_labels, epoch, batch_size, data_path,
     desc_embed = model.lmbda > 0
 
     model.train()
-    gen = data_utils.data_generator(
+    generator = data_utils.data_generator(
         data_path, dicts, batch_size, num_labels, desc_embed=desc_embed)
 
-    for batch_idx, tup in tqdm(enumerate(gen)):
-        data, target, _, code_set, descs = tup
-        data, target = Variable(
-            torch.LongTensor(data)), Variable(torch.FloatTensor(target))
+    for batch_idx, tup in tqdm(enumerate(generator)):
+        data, target_labels, _, code_set, descs = tup
+        data, target_labels = Variable(
+            torch.LongTensor(data)), Variable(torch.FloatTensor(target_labels))
         unseen_code_inds = unseen_code_inds.difference(code_set)
         if gpu:
             data = data.cuda()
-            target = target.cuda()
+            target_labels = target_labels.cuda()
         optimizer.zero_grad()
 
         if desc_embed:
@@ -121,7 +121,7 @@ def train(model, optimizer, number_labels, epoch, batch_size, data_path,
         else:
             desc_data = None
 
-        output, loss, _ = model(data, target, desc_data=desc_data)
+        output, loss, _ = model(data, target_labels, desc_data=desc_data)
 
         loss.backward()
         optimizer.step()
@@ -132,10 +132,10 @@ def train(model, optimizer, number_labels, epoch, batch_size, data_path,
         if not quiet and batch_idx % print_every == 0:
             # print the average loss of the last 10 batches
             logging.info(
-                " Train epoch: {} [batch #{}, batch_size {}, seq length {}]\t"
-                "Loss: {:.6f}".format(
-                    epoch, batch_idx, data.size()[0],
-                    data.size()[1], np.mean(losses[-10:])))
+                "Train epoch: {} [batch #{}, batch_size {}, padded seq "
+                "length {}]\t Loss: {:.6f},".format(
+                    epoch, batch_idx, data.size()[0], data.size()[1],
+                    np.mean(losses[-10:])))
     return losses, unseen_code_inds
 
 
@@ -316,15 +316,15 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
     one_batch = data_utils.data_generator(
         filename, dicts, 1, num_labels, desc_embed=desc_embed)
     for batch_idx, tup in tqdm(enumerate(one_batch)):
-        data, target, hadm_ids, _, descs = tup
-        # data, target = Variable(torch.LongTensor(data), volatile=True),
-        # Variable(torch.FloatTensor(target))
+        data, target_labels, hadm_ids, _, descs = tup
+        # data, target_labels = Variable(torch.LongTensor(data), volatile=True),
+        # Variable(torch.FloatTensor(target_labels))
         # TODO: do we need to use torch.no_grad()??
-        data, target = torch.LongTensor(data), torch.FloatTensor(target)
+        data, target_labels = torch.LongTensor(data), torch.FloatTensor(target_labels)
 
         if gpu:
             data = data.cuda()
-            target = target.cuda()
+            target_labels = target_labels.cuda()
         model.zero_grad()
 
         if desc_embed:
@@ -336,23 +336,23 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         get_attn = save_tp_fp_examples and (
             np.random.rand() < 0.02 or (fold == 'test' and testing))
         output, loss, alpha = model(
-            data, target, desc_data=desc_data, get_attention=get_attn)
+            data, target_labels, desc_data=desc_data, get_attention=get_attn)
 
         # output = F.sigmoid(output)
         output = torch.sigmoid(output)
         output = output.data.cpu().numpy()
         # losses.append(loss.data[0])
         losses.append(loss.data.item())
-        target_data = target.data.cpu().numpy()
+        target_labels_data = target_labels.data.cpu().numpy()
         if get_attn and save_tp_fp_examples:
             interpret.save_samples(
-                data, output, target_data, alpha, window_size,
+                data, output, target_labels_data, alpha, window_size,
                 epoch, tp_file, fp_file, dicts=dicts)
 
-        # save predictions, target, hadm ids
+        # save predictions, target_labels, hadm ids
         yhat_raw.append(output)
         output = np.round(output)
-        y.append(target_data)
+        y.append(target_labels_data)
         yhat.append(output)
         hids.extend(hadm_ids)
 
@@ -469,7 +469,7 @@ if __name__ == "__main__":
         help="optional flag for multi_conv_attn to instead use concatenated "
              "filter outputs, rather than pooling over them")
     parser.add_argument(
-        "--save_tp_fp_examples", required=False, const=True,
+        "--save_tp_fp_examples", action="store_const", required=False, const=True,
         help="optional flag to save samples of good / bad predictions")
     parser.add_argument(
         "--quiet", action="store_const", required=False, const=True,

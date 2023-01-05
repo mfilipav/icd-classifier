@@ -48,7 +48,7 @@ def construct_X_Y(notefile, Y, w2ind, c2ind):
 
         notefile example:
         SUBJECT_ID,HADM_ID,TEXT,LABELS,length
-        7908, 182396, admission date discharge date date of birth sex m service 
+        7908, 182396, admission date discharge date date of birthtervice
             historyof the present illness this is a year old man with a ..,
         287.5;45.13;584.9, 105
     """
@@ -271,7 +271,7 @@ def main(args):
         # train first two examples:
         # HADM_ID,BOW,LABELS
         # 182396,
-        # 1765:1 3569:2 3660:1 3829:1 4406:1 4888:1 5446:4 8400:1 9541:1  
+        # 1765:1 3569:2 3660:1 3829:1 4406:1 4888:1 5446:4 8400:1 9541:1
         # 46919:4 <....> 1160:1 51264:4 51735:1 51765:1,  # 79 words total
         #   287.5;45.13;584.9
     else:
