@@ -1,8 +1,14 @@
 from collections import defaultdict
 import csv
 import numpy as np
+from tqdm import tqdm
 import logging
-from icd_classifier.settings import DATA_DIR, MIMIC_3_DIR, MAX_LENGTH
+from nltk.tokenize import RegexpTokenizer
+from icd_classifier.settings import (
+    MIMIC_3_DIR, DESCRIPTIONS_DIAGNOSES_FILE,
+    DESCRIPTIONS_PROCEDURES_FILE,
+    DESCRIPTIONS_CODES_FILE,
+    DESCRIPTIONS_VECTORS_FILE, MAX_LENGTH)
 
 
 def reformat(code, is_diag):
@@ -25,11 +31,99 @@ def reformat(code, is_diag):
     return code
 
 
-def load_code_descriptions():
-    # load description lookup from the appropriate data files
+def load_code_descriptions(descriptions_diagnoses_file,
+                           descriptions_procedures_file,
+                           descriptions_codes_file):
+    """
+    load ICD9 code description lookup from 3 descriptions files
+
+    Diagnoses example:
+    row_id, icd9_code, short_title, long_title
+    1, 01716, Erythem nod tb-oth test,
+        "Erythema nodosum with hypersensitivity reaction in tuberculosis,
+        tubercle bacilli not found by bacteriological or histological
+        examination, but tuberculosis confirmed by other methods
+        [inoculation of animals]"
+    2, 01720, TB periph lymph-unspec,
+        "Tuberculosis of peripheral lymph nodes, unspecified"
+
+    Procedures example:
+    row_id, icd9_code, short_title, long_title
+    1, 1423, Chorioret les xenon coag,
+        Destruction of chorioretinal lesion by xenon arc photocoagulation
+    7, 1431, Retinal tear diathermy, Repair of retinal tear by diathermy
+
+    Codes example:
+    @	ICD9 Hierarchy Root
+    00	Procedures and interventions, Not Elsewhere Classified
+    00-99.99	PROCEDURES
+    00.0	Therapeutic ultrasound
+    00.01	Therapeutic ultrasound of vessels of head and neck
+    ..
+    00.1	Pharmaceuticals
+    00.10	Implantation of chemotherapeutic agent
+    00.11	Infusion of drotrecogin alfa (activated)
+    00.12	Administration of inhaled nitric oxide
+    ..
+    00.2	Intravascular imaging of blood vessels
+    00.21	Intravascular imaging of extracranial cerebral vessels
+    00.22	Intravascular imaging of intrathoracic vessels
+    ..
+    00.3	Computer assisted surgery [CAS]
+    00.31	Computer assisted surgery with CT/CTA
+    00.32	Computer assisted surgery with MR/MRA
+    ..
+    00.4	Adjunct Vascular System Procedures
+    00.40	Adjunct vascular system procedure on single vessel
+    00.41	Adjunct vascular system procedure on two vessels
+    ..
+    00.5	Other cardiovascular procedures
+    00.50	Implantation of cardiac resynchronization pacemaker without mention
+        of defibrillation, total system [CRT-P]
+    00.51	Implantation of cardiac resynchronization defibrillator, total
+        system [CRT-D]
+    ..
+    00.9	Other procedures and interventions
+    00.91	Transplant from live related donor
+    00.92	Transplant from live non-related donor
+    00.93	Transplant from cadaver
+    00.94	Intra-operative neurophysiologic monitoring
+    001	Cholera
+    001-009.99	INTESTINAL INFECTIOUS DISEASES
+    001-139.99	INFECTIOUS AND PARASITIC DISEASES
+    001-999.99	DISEASES AND INJURIES
+    001.0	Cholera due to Vibrio cholerae
+    001.1	Cholera due to Vibrio cholerae el tor
+    ..
+    E800	Railway accident involving collision with rolling stock
+    E800-E807.9	RAILWAY ACCIDENTS
+    E800-E999.9	SUPPLEMENTARY CLASSIFICATION OF EXTERNAL CAUSES OF INJURY
+        AND POISONING
+    E800.0	Railway accident involving collision with rolling stock and
+        injuring railway employee
+    ..
+    V01	Contact with or exposure to communicable diseases
+    V01-V06.99	PERSONS WITH POTENTIAL HEALTH HAZARDS RELATED TO COMMUNICABLE
+        DISEASES
+    V01-V86.99	SUPPLEMENTARY CLASSIFICATION OF FACTORS INFLUENCING HEALTH
+        STATUS AND CONTACT WITH HEALTH SERVICES
+    V01.0	Contact with or exposure to cholera
+    V01.1	Contact with or exposure to tuberculosis
+
+
+    Output:
+    dict with {'code': 'code description'} structure
+    V87.32:Contact with and (suspected) exposure to algae bloom
+    91.89:Microscopic examination of specimen from other site, other
+        microscopic examination
+    V86.1:ESTROGEN RECEPTOR STATUS
+    Size of 'desc_dict': 22,267 codes
+        14,567 from diagnoses, 3,857 from procedures and 3,843 from codes file
+    """
     desc_dict = defaultdict(str)
-    with open("%s/D_ICD_DIAGNOSES.csv" % (DATA_DIR), 'r') as descfile:
-        r = csv.reader(descfile)
+
+    with open(descriptions_diagnoses_file, 'r') as diagnoses_f:
+        r = csv.reader(diagnoses_f)
         # header
         next(r)
         for row in r:
@@ -41,8 +135,8 @@ def load_code_descriptions():
             "dict length={}. Last item: {}:{}".format(
                 len(desc_dict), code, desc))
 
-    with open("%s/D_ICD_PROCEDURES.csv" % (DATA_DIR), 'r') as procfile:
-        r = csv.reader(procfile)
+    with open(descriptions_procedures_file, 'r') as procedures_f:
+        r = csv.reader(procedures_f)
         # header
         next(r)
         for row in r:
@@ -56,8 +150,8 @@ def load_code_descriptions():
             "dict length={}. Last item: {}:{}".format(
                 len(desc_dict), code, desc))
 
-    with open('%s/ICD9_descriptions' % DATA_DIR, 'r') as labelfile:
-        for row in labelfile:
+    with open(descriptions_codes_file, 'r') as codes_f:
+        for row in codes_f:
             row = row.rstrip().split()
             code = row[0]
             if code not in desc_dict.keys():
@@ -71,11 +165,62 @@ def load_code_descriptions():
     return desc_dict
 
 
-def load_description_vectors(Y):
+def vocab_index_descriptions(
+        vocab_file, vectors_file):
+    """
+    Pre-computes the vocab-indexed version of each code description
+    Output:
+    CODE VECTOR
+    017.20 48630 33097 35465 28649 32143 49435
+        (desc: Tuberculosis of peripheral lymph nodes, unspecified examination)
+    ..
+    V86 18583 39582 44551
+        (desc: Estrogen receptor status)
+    V86-V86.99 18583 39582 44551
+        (desc: ESTROGEN RECEPTOR STATUS)
+    """
+    # load lookups
+    vocab = set()
+    with open(vocab_file, 'r') as vocabfile:
+        for i, line in enumerate(vocabfile):
+            line = line.strip()
+            if line != '':
+                vocab.add(line)
+    ind2w = {i+1: w for i, w in enumerate(sorted(vocab))}
+    w2ind = {w: i for i, w in ind2w.items()}
+    desc_dict = load_code_descriptions(
+        DESCRIPTIONS_DIAGNOSES_FILE,
+        DESCRIPTIONS_PROCEDURES_FILE,
+        DESCRIPTIONS_CODES_FILE)
+
+    tokenizer = RegexpTokenizer(r'\w+')
+
+    with open(vectors_file, 'w') as output_file:
+        w = csv.writer(output_file, delimiter=' ')
+        w.writerow(["CODE", "VECTOR"])
+        for code, desc in tqdm(desc_dict.items()):
+            # same tokenizing as in data.get_discharge_summaries()
+            tokens = [
+                t.lower() for t in tokenizer.tokenize(
+                    desc) if not t.isnumeric()]
+            inds = [
+                w2ind[t] if t in w2ind.keys() else len(
+                    w2ind) + 1 for t in tokens]
+            # code: 017.20
+            # desc: Tuberculosis of peripheral lymph nodes, unspecified
+            # tokens: [
+            #   'tuberculosis', 'of', 'peripheral', 'lymph',
+            #   'nodes', 'unspecified']
+            # inds: [48630, 33097, 35465, 28649, 32143, 49435]
+            # logging.debug("code: {}, desc: {}, tokens: {}, inds: {}".format(
+            #     code, desc, tokens, inds))
+            w.writerow([code] + [str(i) for i in inds])
+
+
+def load_description_vectors(descriptions_vectors_file):
     # load description one-hot vectors from file
     dv_dict = {}
-    data_dir = MIMIC_3_DIR
-    with open("%s/description_vectors.vocab" % (data_dir), 'r') as vfile:
+    with open(descriptions_vectors_file, 'r') as vfile:
         r = csv.reader(vfile, delimiter=" ")
         # header
         next(r)
@@ -259,7 +404,10 @@ def load_full_codes(train_path):
             code lookup, description lookup
     """
     # get description lookup
-    desc_dict = load_code_descriptions()
+    desc_dict = load_code_descriptions(
+        DESCRIPTIONS_DIAGNOSES_FILE,
+        DESCRIPTIONS_PROCEDURES_FILE,
+        DESCRIPTIONS_CODES_FILE)
     # build code lookups from appropriate datasets
     codes = set()
     for split in ['train', 'dev', 'test']:
@@ -289,8 +437,9 @@ def load_full_codes(train_path):
     return ind2c, desc_dict
 
 
-def load_lookups(train_path, model, number_labels, vocab,
-                 public_model=False, desc_embed=False):
+def load_lookups(
+        train_path, model, number_labels, vocab,
+        public_model=False, desc_embed=False):
     """
         Inputs:
         Outputs:
@@ -312,12 +461,16 @@ def load_lookups(train_path, model, number_labels, vocab,
             for row in lr:
                 codes.add(row[0])
         ind2c = {i: c for i, c in enumerate(sorted(codes))}
-        desc_dict = load_code_descriptions()
+        desc_dict = load_code_descriptions(
+            DESCRIPTIONS_DIAGNOSES_FILE,
+            DESCRIPTIONS_PROCEDURES_FILE,
+            DESCRIPTIONS_CODES_FILE)
+
     c2ind = {c: i for i, c in ind2c.items()}
 
     # get description one-hot vector lookup
     if desc_embed:
-        dv_dict = load_description_vectors(number_labels)
+        dv_dict = load_description_vectors(DESCRIPTIONS_VECTORS_FILE)
     else:
         dv_dict = None
 

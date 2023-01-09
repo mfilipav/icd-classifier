@@ -3,9 +3,7 @@ from collections import Counter
 import pandas as pd
 import pickle
 import logging
-from collections import Counter
 import numpy as np
-import pandas as pd
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.model_selection import train_test_split
 from icd_classifier.settings import Keys, Tables, DATA_DIR, DATA_COMPRESSION_GZ

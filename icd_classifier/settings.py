@@ -18,6 +18,11 @@ DATA_DIR = 'data/processed'
 DATA_COMPRESSION_GZ = True
 MODEL_DIR = 'models/'
 
+DESCRIPTIONS_DIAGNOSES_FILE = "%s/D_ICD_DIAGNOSES.csv" % (DATA_DIR)
+DESCRIPTIONS_PROCEDURES_FILE = "%s/D_ICD_PROCEDURES.csv" % (DATA_DIR)
+DESCRIPTIONS_CODES_FILE = "%s/ICD9_descriptions" % (DATA_DIR)
+DESCRIPTIONS_VECTORS_FILE = "%s/description_vectors.vocab" % (DATA_DIR)
+
 
 class Tables:
     if DATA_COMPRESSION_GZ:

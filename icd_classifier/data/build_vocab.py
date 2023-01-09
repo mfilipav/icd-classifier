@@ -56,7 +56,8 @@ def build_vocab(vocab_min, infile, vocab_filename):
             # record where the next note starts
             note_inds.append(len(indices))
             indset = set(indices[note_inds[-2]:note_inds[-1]])
-            # go thru all the word indices you just added, and add to the note occurrence count for each of them
+            # go through all the word indices you just added,
+            # and add to the note occurrence count for each of them
             for ind in indset:
                 note_occur[ind] += 1
             note_numwords.append(numwords)
@@ -64,28 +65,35 @@ def build_vocab(vocab_min, infile, vocab_filename):
         # clip trailing zeros
         note_occur = note_occur[note_occur > 0]
 
-        # turn vocab into a list so indexing doesn't get fd up when we drop rows
+        # turn vocab into a list so indexing doesn't get messed up
+        # when the rows are dropped later
         vocab_list = np.array(
-            [word for word, ind in sorted(vocab.items(), key=operator.itemgetter(1))])
+            [word for word, ind in sorted(
+                vocab.items(), key=operator.itemgetter(1))])
 
         # 1. create sparse document matrix
         C = csr_matrix((data, indices, note_inds), dtype=int).transpose()
         # also need the numwords array to be a sparse matrix
         note_numwords = csr_matrix(1. / np.array(note_numwords))
-        
+
         # 2. remove rows with less than 3 total occurrences
         print("removing rare terms")
-        # inds holds indices of rows corresponding to terms that occur in >= 3 documents
+        # inds holds indices of rows corresponding to terms
+        # that occur in >= 3 documents
         inds = np.nonzero(note_occur >= vocab_min)[0]
         logging.info(
             "{} word tokens occur in {} or more documents, out "
-            "{} total words".format(str(len(inds)), vocab_min, str(C.shape[0])))
-        
+            "{} total words".format(
+                str(len(inds)), vocab_min, str(C.shape[0])))
+
         # drop those rows
         C = C[inds, :]
         note_occur = note_occur[inds]
         vocab_list = vocab_list[inds]
 
+        # 3. TODO: ??? sort vocabulary alphabetically?
+
+        # 3. Write vocabulary to file
         logging.info("Writing vocab to {}".format(vocab_filename))
         with open(vocab_filename, 'w') as vocab_file:
             for word in vocab_list:
