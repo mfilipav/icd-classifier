@@ -17,3 +17,4 @@ tqdm
 gensim
 flake8
 python-dotenv
+libpecos

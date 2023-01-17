@@ -19,38 +19,55 @@ from sklearn.svm import SVC, LinearSVC
 from sklearn.linear_model import SGDClassifier
 from icd_classifier.settings import MODEL_DIR, DATA_DIR
 from icd_classifier.data import data_utils
-import evaluation
+from icd_classifier.modeling import evaluation
 from icd_classifier.modeling import tools
+from pecos.xmc.xlinear.model import XLinearModel
+from pecos.xmc import Indexer, LabelEmbeddingFactory
 
 
 def construct_X_Y(notefile, Y, w2ind, c2ind):
     """
-        Each row in notesfile consists of text pertaining to one admission
-        OneVsRestClassifier can also be used for multilabel classification.
-        To use this feature, provide an indicator matrix for the target y when
-        calling .fit. In other words, the target labels should be formatted
-        as a 2D binary (0/1) matrix, where [i, j] == 1 indicates the presence
-        of label j in sample i. This estimator uses the binary relevance method
-        to perform multilabel clf, which involves training one binary
-        classifier independently for each label
+    Each row in notesfile consists of text pertaining to one admission
+    OneVsRestClassifier can also be used for multilabel classification.
+    To use this feature, provide an indicator matrix for the target y when
+    calling .fit. In other words, the target labels should be formatted
+    as a 2D binary (0/1) matrix, where [i, j] == 1 indicates the presence
+    of label j in sample i. This estimator uses the binary relevance method
+    to perform multilabel clf, which involves training one binary
+    classifier independently for each label
 
-        INPUTS:
-            notefile: path to preprocessed file containing the sub and hadm id
-                notes text, labels and length
-            Y: size of the output label space
-            w2ind: dictionary from words to integers for discretizing
-            c2ind: dictionary from labels to integers for discretizing
-        OUTPUTS:
-            csr_matrix where each row is a BOW
-                Dimension: (# samples in dataset) x (vocab size)
-            yy indicator matrix, training set, in shape [8066, 50]
+    INPUTS:
+        notefile: path to preprocessed file containing the sub and hadm id
+            notes text, labels and length
+        Y: size of the output label space
+        w2ind: dictionary from words to integers for discretizing
+        c2ind: dictionary from labels to integers for discretizing
+
+    OUTPUTS:
+    csr_matrix where each row is a BOW
+        Dimension: (# samples in dataset) x (vocab size)
+    csr_matrix((data, indices, indptr), [shape=(M, N)])
+        is the standard CSR representation where the column indices for
+        row i are stored in ``indices[indptr[i]:indptr[i+1]]`` and their
+        corresponding values are stored in ``data[indptr[i]:indptr[i+1]]``.
+        If the shape parameter is not supplied, the matrix dimensions
+        are inferred from the index arrays.
+
+    yy indicator matrix, training set, in shape [8066, 50]
+    Where:
+        data
+            CSR format data array of the matrix
+        indices
+            CSR format index array of the matrix
+        indptr
+            CSR format index pointer array of the matrix
 
 
-        notefile example:
-        SUBJECT_ID,HADM_ID,TEXT,LABELS,length
-        7908, 182396, admission date discharge date date of birthtervice
-            historyof the present illness this is a year old man with a ..,
-        287.5;45.13;584.9, 105
+    notefile example:
+    SUBJECT_ID,HADM_ID,TEXT,LABELS,length
+    7908, 182396, admission date discharge date date of birthtervice
+        historyof the present illness this is a year old man with a ..,
+    287.5;45.13;584.9, 105
     """
     # assert Y == len(c2ind)  # True, if top 50 labels
     yy = []
@@ -89,7 +106,6 @@ def construct_X_Y(notefile, Y, w2ind, c2ind):
             i += 1
             hadm_ids.append(int(row[1]))
         subj_inds.append(len(indices))
-
     return csr_matrix((data, indices, subj_inds)), np.array(yy), hadm_ids
 
 
@@ -108,7 +124,7 @@ def write_bows(out_name, X, hadm_ids, y, ind2c):
             w.writerow([str(hadm_ids[i]), bow_str, code_str])
 
 
-def read_bows(bow_fname, c2ind):
+def read_bows(bow_fname, c2ind, model):
     num_labels = len(c2ind)
     data = []
     row_ind = []
@@ -121,8 +137,6 @@ def read_bows(bow_fname, c2ind):
         # header
         next(r)
         for i, row in tqdm(enumerate(r)):
-            if i % 10000 == 0:
-                logging.debug("Read bow file row {}: {}".format(i, row))
             hid = int(row[0])
             bow_str = row[1]
             code_str = row[2]
@@ -135,8 +149,25 @@ def read_bows(bow_fname, c2ind):
             label_set = set([c2ind[c] for c in code_str.split(';')])
             y.append([1 if j in label_set else 0 for j in range(num_labels)])
             hids.append(hid)
+            if i < 3:
+                logging.debug(
+                    "Read bow file row {}: {}".format(i, row))
+                logging.debug(
+                    "Len Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
+                        len(data), len(row_ind), len(col_ind), len(y)))
+                logging.debug(
+                    "Val Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
+                        data, row_ind, col_ind, y))
+
         X = csr_matrix((data, (row_ind, col_ind)))
-    return X, np.array(y), hids
+        if model == 'xr_linear':
+            y = csr_matrix((y, (row_ind, row_ind)))
+        else:
+            y = np.array(y)
+    logging.info("X.shape: " + str(X.shape))
+    logging.info("y.shape: " + str(y.shape))
+
+    return X, y, hids
 
 
 def calculate_top_ngrams(inputfile, clf, c2ind, w2ind,
@@ -227,6 +258,7 @@ def calculate_top_ngrams(inputfile, clf, c2ind, w2ind,
 
 
 def main(args):
+    model = args.model
 
     # STEP 1: DATA PREPARATION
 
@@ -275,10 +307,11 @@ def main(args):
         # 46919:4 <....> 1160:1 51264:4 51735:1 51765:1,  # 79 words total
         #   287.5;45.13;584.9
     else:
-        logging.info("Found existing BOWs file: {}. Skip its "
-                     "preprocessing".format(train_bows_file))
-        X, yy_tr, hids_tr = read_bows(train_bows_file, c2ind)
-        X_dv, yy_dv, hids_dv = read_bows(dev_bows_file, c2ind)
+        logging.info("Found existing BOWs file: {}. Skip its preprocessing, "
+                     "read in with format for model: {}".format(
+                        train_bows_file, model))
+        X, yy_tr, hids_tr = read_bows(train_bows_file, c2ind, model)
+        X_dv, yy_dv, hids_dv = read_bows(dev_bows_file, c2ind, model)
 
     # X.shape: (8066, 51918)
     # yy_tr.shape: (8066, 50)
@@ -301,7 +334,6 @@ def main(args):
 
     # STEP 2: ONE-VS-REST MULTILABEL CLASSIFICATION
     # build the classifier
-    model = args.model
     if model == 'log_reg':
         logging.info("Building One-vs-Rest Log Reg classifier, with probs")
         # n_jobs=-1 means using all CPU resources
@@ -327,6 +359,11 @@ def main(args):
         clf = OneVsRestClassifier(SGDClassifier(
                 penalty='l2', loss='hinge', dual=False, C=1,
                 class_weight='balanced', verbose=True), n_jobs=-1)
+    if model == 'xr_linear':
+        logging.info("Building hierarchical label tree for Pecos XR-Linear model")
+        label_feat = LabelEmbeddingFactory.create(yy, X)
+        cluster_chain = Indexer.gen(label_feat)
+
     else:
         logging.error('Unsupported classifier: {}'.format(model))
     # TODO where is clf.coef_ ?
@@ -334,7 +371,10 @@ def main(args):
 
     # train
     logging.info("Training/fitting classifier...")
-    clf.fit(X, yy)
+    if model == 'xr_linear':
+        clf = XLinearModel.train(X, yy, C=cluster_chain)
+    else:
+        clf.fit(X, yy)
 
     logging.info("Predicting on dev set...")
     # yhat: binary predictions matrix
