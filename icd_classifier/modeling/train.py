@@ -85,7 +85,7 @@ def early_stop(metrics_hist, early_stopping_metric, patience):
         return False
 
 
-def train(model, optimizer, number_labels, epoch, batch_size, data_path,
+def train(model, optimizer, epoch, batch_size, data_path,
           gpu, dicts, quiet):
     """
         Training loop.
@@ -147,7 +147,7 @@ def one_epoch(model, optimizer, number_labels, epoch, n_epochs, batch_size,
     """
     if not testing:
         losses, unseen_code_inds = train(
-            model, optimizer, number_labels, epoch, batch_size,
+            model, optimizer, epoch, batch_size,
             data_path, gpu, dicts, quiet)
         loss = np.mean(losses)
         logging.info("epoch {} loss: {}".format(epoch, loss))
@@ -320,7 +320,8 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         # data, target_labels = Variable(torch.LongTensor(data), volatile=True),
         # Variable(torch.FloatTensor(target_labels))
         # TODO: do we need to use torch.no_grad()??
-        data, target_labels = torch.LongTensor(data), torch.FloatTensor(target_labels)
+        data = torch.LongTensor(data)
+        target_labels = torch.FloatTensor(target_labels)
 
         if gpu:
             data = data.cuda()
@@ -333,10 +334,11 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
             desc_data = None
 
         # get an attention sample for 2% of batches
-        get_attn = save_tp_fp_examples and (
+        get_attention = save_tp_fp_examples and (
             np.random.rand() < 0.02 or (fold == 'test' and testing))
         output, loss, alpha = model(
-            data, target_labels, desc_data=desc_data, get_attention=get_attn)
+            data, target_labels, desc_data=desc_data,
+            get_attention=get_attention)
 
         # output = F.sigmoid(output)
         output = torch.sigmoid(output)
@@ -344,7 +346,7 @@ def test(model, number_labels, epoch, data_path, fold, gpu, code_inds,
         # losses.append(loss.data[0])
         losses.append(loss.data.item())
         target_labels_data = target_labels.data.cpu().numpy()
-        if get_attn and save_tp_fp_examples:
+        if get_attention and save_tp_fp_examples:
             interpret.save_samples(
                 data, output, target_labels_data, alpha, window_size,
                 epoch, tp_file, fp_file, dicts=dicts)
@@ -469,7 +471,8 @@ if __name__ == "__main__":
         help="optional flag for multi_conv_attn to instead use concatenated "
              "filter outputs, rather than pooling over them")
     parser.add_argument(
-        "--save_tp_fp_examples", action="store_const", required=False, const=True,
+        "--save_tp_fp_examples", action="store_const", required=False,
+        const=True,
         help="optional flag to save samples of good / bad predictions")
     parser.add_argument(
         "--quiet", action="store_const", required=False, const=True,

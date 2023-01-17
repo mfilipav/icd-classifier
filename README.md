@@ -17,9 +17,10 @@ requirements.txt
     $ pip install -r requirements.txt
     ```
 
-1. install the package
+1. install the `icd_classifier` package
 ```pip install -m .```
 
+1. to install PECOS with python version > 3.9, install from source: `pip install git+https://github.com/amzn/pecos.git`
 
 1. Download MIMIC-III data files from https://physionet.org/works/MIMICIIIClinicalDatabase/files/
 put `.csv.gz` files in `data/raw/` directory
@@ -39,22 +40,21 @@ Logistic regression
 
 ```
 # much better results
-python icd_classifier/modeling/traditional_clf.py --train_file data/processed/train_50.csv --dev_file data/processed/dev_50.csv --vocab data/processed/vocab.csv --Y 50 --model log_reg --ngram 0
-
-# TODO: resolve issues with this implementation
-python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --Y 50 --model log_reg --n_epochs 100 --pool avg --batch_size 16 --lr 0.003 --embeddings_file data/processed/processed_full.embed --gpu
+python icd_classifier/modeling/traditional_clf.py --train_file data/processed/train_50.csv --test_file data/processed/dev_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model log_reg --ngram 0
 ```
 
 SVC linear
 ```
-python icd_classifier/modeling/traditional_clf.py --train_file data/processed/train_50.csv --dev_file data/processed/dev_50.csv --vocab data/processed/vocab.csv --model linear_svc --Y 50 --ngram 0
+python icd_classifier/modeling/traditional_clf.py --train_file data/processed/train_50.csv --test_file data/processed/dev_50.csv --vocab data/processed/vocab.csv --model linear_svc --number_labels 50 --ngram 0
 ```
 
 CNN
-- basic
-- no attention mechanism yet
+- 500 filter maps f1_micro is better than 50 prec_at_5, vs 50 f1_micro
+
 ```
-python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model basic_cnn --n_epochs 100 --filter_size 4 --filter_maps 500 --dropout 0.2 --lr 0.003 --embeddings_file data/processed/processed_full.embed --gpu```
+python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model basic_cnn --n_epochs 100 --filter_size 4 --filter_maps 50 --dropout 0.2 --lr 0.003 --embeddings_file data/processed/processed_full.embed --early_stopping_metric prec_at_5 --gpu
+```
+
 
 RNN
 ```

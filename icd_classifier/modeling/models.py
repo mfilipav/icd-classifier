@@ -213,10 +213,10 @@ class BasicCNN(BaseModel):
         x = x.squeeze(dim=2)
 
         # linear output
-        x = self.fc(x)
+        y = self.fc(x)
 
         # final sigmoid to get predictions
-        yhat = x
+        yhat = y
         loss = self._get_loss(yhat, target)
         return yhat, loss, attn
 
@@ -245,6 +245,116 @@ class BasicCNN(BaseModel):
         # put it in the right form for passing to interpret
         attn_full = attn_full.transpose(1, 2)
         return attn_full
+
+
+class CAML(BaseModel):
+    """
+    Copied and re-formatted from Mullenbach 2018
+    """
+
+    def __init__(self, number_labels, embeddings_file, kernel_size,
+                 filter_maps, lmbda, gpu, dicts, embedding_size=100,
+                 dropout=0.5, code_emb=None):
+        super(CAML, self).__init__(
+            number_labels, embeddings_file, dicts, lmbda, dropout=dropout,
+            gpu=gpu, embedding_size=embedding_size)
+
+        # initialize conv layer as in 2.1
+        self.conv = nn.Conv1d(
+            in_channels=self.embedding_size, out_channels=filter_maps,
+            kernel_size=kernel_size, padding=int(floor(kernel_size/2)))
+        xavier_uniform(self.conv.weight)
+
+        # per-label context vectors for computing attention as in 2.2
+        self.U = nn.Linear(
+            in_features=filter_maps, out_features=number_labels)
+        xavier_uniform(tensor=self.U.weight)
+
+        # final layer: create a matrix to use for the L binary
+        # classifiers as in 2.3
+        self.final = nn.Linear(
+            in_features=filter_maps, out_features=number_labels)
+        xavier_uniform(self.final.weight)
+
+        # initialize with trained code embeddings if applicable, DR-CAML
+        if code_emb:
+            self._code_emb_init(code_emb, dicts)
+            # also set conv weights to do sum of inputs
+            # expand 3rd dim to be replicated of 'kernel_size'
+            # (first two dims leave untouched -1, -1)
+            weights = torch.eye(
+                n=self.embedding_size).unsqueeze(dim=2).expand(
+                    -1, -1, kernel_size) / kernel_size
+            self.conv.weight.data = weights.clone()
+            self.conv.bias.data.zero_()
+
+        # besides 'self.embed', created at BaseModel.__init__, create
+        # description embeddings.
+        # Convolution applied to label descriptions as in 2.5
+        # description module has its own embedding and convolution layers
+        if lmbda > 0:
+            logging.info("Initialize description embeddings")
+            W = self.embed.weight.data
+            num_embeddings = W.size()[0]
+            embedding_dim = W.size()[1]
+            self.desc_embedding = nn.Embedding(
+                num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                padding_idx=0)
+            self.desc_embedding.weight.data = W.clone()
+            logging.info(
+                "size of description embeddings: {}, "
+                "size of each desc embedding vector: {}".format(
+                        num_embeddings, embedding_dim))
+
+            self.label_conv = nn.Conv1d(
+                in_channels=self.embedding_size, out_channels=filter_maps,
+                kernel_size=kernel_size, padding=int(floor(kernel_size/2)))
+            xavier_uniform(self.label_conv.weight)
+
+            self.label_fc1 = nn.Linear(
+                in_features=filter_maps, out_features=filter_maps)
+            xavier_uniform(self.label_fc1.weight)
+
+    def _code_emb_init(self, code_emb, dicts):
+        code_embeddings = KeyedVectors.load_word2vec_format(fname=code_emb)
+        weights = np.zeros(shape=self.final.weight.size())
+        for i in range(self.number_labels):
+            code = dicts['ind2c'][i]
+            weights[i] = code_embeddings[code]
+        self.U.weight.data = torch.Tensor(weights).clone()
+        self.final.weight.data = torch.Tensor(weights).clone()
+
+    def forward(self, x, target, desc_data=None, get_attention=True):
+        # get embeddings and apply dropout
+        x = self.embed(x)
+        x = self.embed_drop(x)
+        x = x.transpose(1, 2)
+
+        # apply convolution and nonlinearity (tanh)
+        x = torch.tanh(self.conv(x).transpose(1, 2))
+        # apply attention
+        alpha = F.softmax(
+            self.U.weight.matmul(x.transpose(1, 2)), dim=2)
+
+        # document representations are weighted sums using the attention.
+        # Can compute all at once as a matmul
+        m = alpha.matmul(x)
+
+        # final layer classification
+        y = self.final.weight.mul(m).sum(dim=2).add(self.final.bias)
+
+        if desc_data is not None:
+            # run descriptions through description module
+            b_batch = self.embed_descriptions(desc_data, self.gpu)
+            # get l2 similarity loss
+            diffs = self._compare_label_embeddings(target, b_batch, desc_data)
+        else:
+            diffs = None
+
+        # final sigmoid to get predictions
+        yhat = y
+        loss = self._get_loss(yhat, target, diffs)
+        return yhat, loss, alpha
 
 
 class RNN(BaseModel):
