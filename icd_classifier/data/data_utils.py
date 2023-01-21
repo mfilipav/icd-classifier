@@ -396,10 +396,11 @@ def load_vocab_dict(model, number_labels, vocab_file, public_model=False):
     return ind2w, w2ind
 
 
-def load_full_codes(train_path):
+def load_codes_and_descriptions(train_path, number_labels):
     """
         Inputs:
             train_path: path to train dataset
+            number_labels: 'full' or int with top n labels
         Outputs:
             code lookup, description lookup
     """
@@ -408,31 +409,45 @@ def load_full_codes(train_path):
         DESCRIPTIONS_DIAGNOSES_FILE,
         DESCRIPTIONS_PROCEDURES_FILE,
         DESCRIPTIONS_CODES_FILE)
+
     # build code lookups from appropriate datasets
     codes = set()
-    for split in ['train', 'dev', 'test']:
-        with open(train_path.replace('train', split), 'r') as f:
-            lr = csv.reader(f)
-            next(lr)
+
+    if number_labels == 'full':
+
+        for split in ['train', 'dev', 'test']:
+            with open(train_path.replace('train', split), 'r') as f:
+                lr = csv.reader(f)
+                next(lr)
+                for row in lr:
+                    for code in row[3].split(';'):
+                        codes.add(code)
+            logging.info(
+                "Done loading code descriptions for split: {}".format(split))
+        codes = set([c for c in codes if c != ''])
+    else:
+        with open(
+            "%s/TOP_%s_CODES.csv" % (
+                MIMIC_3_DIR, str(number_labels)), 'r') as labelfile:
+            lr = csv.reader(labelfile)
             for row in lr:
-                for code in row[3].split(';'):
-                    codes.add(code)
-        logging.info(
-            "Done loading code descriptions for split: {}".format(split))
-    codes = set([c for c in codes if c != ''])
-    ind2c = defaultdict(
-        str, {i: c for i, c in enumerate(sorted(codes))})
+                codes.add(row[0])
+
+    ind2c = defaultdict(str, {i: c for i, c in enumerate(sorted(codes))})
+
     logging.info(
-        "Done preparing code and description lookup. Example code ind2c: "
-        "len={}, first5={}, last={}; example desc_dict: len={}, f5={}, "
+        "Done preparing code and description lookup for number_labels: {}. "
+        "Example code ind2c: "
+        "len={}, first5={}, last={}; \nExample desc_dict: len={}, f5={}, "
         "last={}".format(
+            number_labels,
             len(ind2c),
             list(ind2c.items())[0:4],
             list(ind2c.items())[-1],
             len(desc_dict),
             list(desc_dict.items())[0:4],
             list(desc_dict.items())[-1])
-        )
+    )
 
     return ind2c, desc_dict
 
@@ -450,22 +465,7 @@ def load_lookups(
     ind2w, w2ind = load_vocab_dict(model, number_labels, vocab, public_model)
 
     # get code and description lookups
-    if number_labels == 'full':
-        ind2c, desc_dict = load_full_codes(train_path)
-    else:
-        codes = set()
-        with open(
-            "%s/TOP_%s_CODES.csv" % (
-                MIMIC_3_DIR, str(number_labels)), 'r') as labelfile:
-            lr = csv.reader(labelfile)
-            for row in lr:
-                codes.add(row[0])
-        ind2c = {i: c for i, c in enumerate(sorted(codes))}
-        desc_dict = load_code_descriptions(
-            DESCRIPTIONS_DIAGNOSES_FILE,
-            DESCRIPTIONS_PROCEDURES_FILE,
-            DESCRIPTIONS_CODES_FILE)
-
+    ind2c, desc_dict = load_codes_and_descriptions(train_path, number_labels)
     c2ind = {c: i for i, c in ind2c.items()}
 
     # get description one-hot vector lookup

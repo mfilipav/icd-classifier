@@ -217,7 +217,7 @@ def auc_metrics(yhat_raw, y, ymic):
 ########################
 # METRICS BY CODE TYPE
 ########################
-def results_by_type(Y, mdir):
+def results_by_type(number_labels, mdir):
     """
     preds_test.psv
     193800|45.13|486|530.81|V15.82
@@ -264,7 +264,7 @@ def results_by_type(Y, mdir):
     diag_golds = defaultdict(lambda: set([]))
     proc_golds = defaultdict(lambda: set([]))
     golds = defaultdict(lambda: set())
-    test_file = '%s/test_%s.csv' % (MIMIC_3_DIR, str(Y))
+    test_file = '%s/test_%s.csv' % (MIMIC_3_DIR, str(number_labels))
     with open(test_file, 'r') as f:
         r = csv.reader(f)
         # header
@@ -382,16 +382,16 @@ def print_metrics(metrics):
 if __name__ == "__main__":
     if len(sys.argv) < 5:
         logging.info(
-            "usage: python " + str(os.path.basename(__file__) + " [train_dataset] [|Y| (as string)] [version (mimic2 or mimic3)] [model_dir]"))
+            "usage: python " + str(os.path.basename(__file__) + " [train_dataset] [|number_labels| (as string)] [version (mimic2 or mimic3)] [model_dir]"))
         sys.exit(0)
-    train_path, Y, version, mdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    ind2c, _ = data_utils.load_full_codes(train_path, version=version)
+    train_path, number_labels, version, mdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    ind2c, _ = data_utils.load_codes_and_descriptions(train_path, number_labels)
 
-    diag_preds, diag_golds, proc_preds, proc_golds, golds, preds, hadm_ids, type_dicts = results_by_type(Y, mdir, version)
+    diag_preds, diag_golds, proc_preds, proc_golds, golds, preds, hadm_ids, type_dicts = results_by_type(number_labels, mdir, version)
     yhat, yhat_raw, y, metrics = metrics_from_dicts(preds, golds, mdir, ind2c)
     print_metrics(metrics)
 
-    k = [5] if Y == '50' else [8, 15]
+    k = [5] if number_labels == '50' else [8, 15]
     prec_at_8 = precision_at_k(yhat_raw, y, k=8)
     logging.info("PRECISION@8: %.4f" % prec_at_8)
     prec_at_15 = precision_at_k(yhat_raw, y, k=15)
