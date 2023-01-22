@@ -15,7 +15,9 @@ def concat_data(labelsfile, notes_file, outfilename):
             notes_file: sorted by hadm id, contains one note per line
     """
     with open(labelsfile, 'r') as lf:
-        print("CONCATENATING")
+        logging.info(
+            f"Concatenating labels file: {labelsfile} and notes files: "
+            "{notes_file} into one file: {outfilename}")
         with open(notes_file, 'r') as notesfile:
             # outfilename = '%s/notes_labeled.csv' % MIMIC_3_DIR
             with open(outfilename, 'w') as outfile:
@@ -27,8 +29,8 @@ def concat_data(labelsfile, notes_file, outfilename):
 
                 for i, (subj_id, text, hadm_id) in enumerate(notes_gen):
                     if i % 10000 == 0:
-                        print(str(i) + " done")
-                    cur_subj, cur_labels, cur_hadm = next(labels_gen)
+                        logging.info(str(i) + " done")
+                    _, cur_labels, cur_hadm = next(labels_gen)
 
                     if cur_hadm == hadm_id:
                         w.writerow([
@@ -58,8 +60,8 @@ def split_data(labeledfile, base_name):
         ['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
     test_file.write(','.join(
         ['SUBJECT_ID', 'HADM_ID', 'TEXT', 'LABELS']) + "\n")
-    print('train split name: ', train_name)
-    print('labeled name: ', labeledfile)
+    logging.info('train split name: ', train_name)
+    logging.info('labeled name: ', labeledfile)
 
     hadm_ids = {}
 
@@ -79,16 +81,22 @@ def split_data(labeledfile, base_name):
             # filter text, write to file according to train/dev/test split
             hadm_id = row[1]
             if i % 10000 == 0:
-                logging.info(
+                logging.debug(
                     "Row {} read. HADM_ID = {}.\nRow: {}".format(
                         str(i), hadm_id, row))
 
-            if hadm_id in hadm_ids['train']:
-                train_file.write(','.join(row) + "\n")
-            elif hadm_id in hadm_ids['dev']:
-                dev_file.write(','.join(row) + "\n")
-            elif hadm_id in hadm_ids['test']:
-                test_file.write(','.join(row) + "\n")
+            # catch entries without labels
+            labels = row[3]
+            if labels:
+                if hadm_id in hadm_ids['train']:
+                    train_file.write(','.join(row) + "\n")
+                elif hadm_id in hadm_ids['dev']:
+                    dev_file.write(','.join(row) + "\n")
+                elif hadm_id in hadm_ids['test']:
+                    test_file.write(','.join(row) + "\n")
+            else:
+                logging.warning(f"Missing labels at row {i}, row: {row}")
+                continue
 
         train_file.close()
         dev_file.close()

@@ -13,7 +13,9 @@ tokenizer = RegexpTokenizer(r'\w+')
 
 def write_discharge_summaries(notes_file, out_file):
     # notes_file = '%s/NOTEEVENTS.csv.gz' % (MIMIC_3_DIR)
-    logging.info("processing notes file")
+    logging.info(
+        f"Processing notes file '{notes_file}' "
+        "into discharge summaries '{out_file}'")
 
     with gzip.open(notes_file, 'rt',) as csvfile:
         # notes_file = notes_file.split('.gz')[0]

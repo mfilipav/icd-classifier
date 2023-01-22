@@ -2,8 +2,12 @@
 # data/icd_codes/
 data/processed/
 data/raw/
+data/pecos
+pecos/
 project_planning.md
-# models/
+models/
+*.pth
+*.psv
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
