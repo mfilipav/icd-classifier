@@ -60,3 +60,8 @@ RNN
 ```
 python icd_classifier/modeling/train.py --data_path data/processed/train_50.csv --vocab data/processed/vocab.csv --number_labels 50 --model rnn --n_epochs 100 --dropout 0 --lr 0.003 --rnn_dim 100 --rnn_cell_type gru --rnn_layers 1 --embeddings_file data/processed/processed_full.embed --early_stopping_metric prec_at_5 --gpu
 ```
+
+XR-Linear (pecos)
+```
+python icd_classifier/modeling/xml_clf.py --train_file data/processed/train_50.csv --test_file data/processed/dev_50.csv --number_labels 50 --topk 5
+```
