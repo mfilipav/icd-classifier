@@ -46,6 +46,8 @@ def load_code_descriptions(descriptions_diagnoses_file,
         [inoculation of animals]"
     2, 01720, TB periph lymph-unspec,
         "Tuberculosis of peripheral lymph nodes, unspecified"
+    9757,9596,Hip & thigh injury NOS,Hip and thigh injury --> '959.6'
+    9869,E8981,Fire accident --> 'E898.1'
 
     Procedures example:
     row_id, icd9_code, short_title, long_title
@@ -421,10 +423,11 @@ def load_codes_and_descriptions(train_path, number_labels):
                 next(lr)
                 for row in lr:
                     for code in row[3].split(';'):
-                        codes.add(code)
+                        codes.add(str(code))
             logging.info(
                 "Done loading code descriptions for split: {}".format(split))
         codes = set([c for c in codes if c != ''])
+
     else:
         with open(
             "%s/TOP_%s_CODES.csv" % (
@@ -434,6 +437,21 @@ def load_codes_and_descriptions(train_path, number_labels):
                 codes.add(row[0])
 
     ind2c = defaultdict(str, {i: c for i, c in enumerate(sorted(codes))})
+
+    # this is new, to deal with the fact that in XML clf
+    logging.info("Codes in ind2c: {}, {}".format(type(ind2c), len(ind2c)))
+    bad_codes = []
+    for item in ind2c.copy().items():
+        code = item[1]
+        key = item[0]
+        found_value = desc_dict.get(code)
+        if found_value is None:
+            logging.warning('code: {} not found in desc_dict'.format(code))
+            bad_codes.append(item)
+            ind2c.pop(key)
+    logging.info("Codes in ind2c: {}".format(len(ind2c)))
+    logging.info("Codes from ind2c not found in desc_dict: {}, "
+                 "codes: {}".format(len(bad_codes), bad_codes))
 
     logging.info(
         "Done preparing code and description lookup for number_labels: {}. "

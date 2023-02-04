@@ -14,11 +14,13 @@ from icd_classifier.modeling import evaluation
 from icd_classifier.settings import MODEL_DIR
 import logging
 
-
+# TODO consider removing data items without known labels! or replace labels
+# bla bla
+# Remove extra logging
 def convert_to_idx(data, c2ind):
     logging.info(
-        "Converting labels from code to idx, according to dict: {}".format(
-            c2ind))
+        "Converting labels from code to idx, according to c2ind of length: {}".format(
+            len(c2ind)))
     converted_data = []
     for i, item in enumerate(data):
         item_labels = []
@@ -76,8 +78,9 @@ def prepare_x_y_csr_matrices(
     # 1. Encode labels, Y
     # prepare list of all labels:
     ind2c, desc_dict = load_codes_and_descriptions(train_file, number_labels)
-    c2ind = {c: i for i, c in ind2c.items()}
-    codes_list = list(ind2c.keys())
+    c2ind = {str(c): i for i, c in ind2c.items()}
+    idx_list = list(ind2c.keys())
+    # codes_list = list(c2ind.keys())
 
     # get ranked list of descriptions as in c2ind
     desc_dict = dict(desc_dict)
@@ -123,8 +126,8 @@ def prepare_x_y_csr_matrices(
     code_to_desc = get_code_to_desc(desc_dict, c2ind)
     assert len(code_to_desc) == len(c2ind)
 
-    logging.info(f"c2ind: {c2ind}")
-    logging.info(f"desc_dict len: {len(code_to_desc)}, dict: {code_to_desc}")
+    logging.info(f"c2ind len: {len(c2ind)}")
+    logging.info(f"desc_dict len: {len(code_to_desc)}, dict: {code_to_desc[:2]}")
 
     path_corpus = 'data/processed/pecos_corpus_'+str(number_labels)+'.txt'
     if prepare_text_files:
@@ -157,7 +160,7 @@ def prepare_x_y_csr_matrices(
     # create multihot label encoding, CSR matrix
     logging.info("Preparing CSR matrices for Y train, test")
     label_encoder_multilabel = MultiLabelBinarizer(
-        classes=codes_list, sparse_output=True)
+        classes=idx_list, sparse_output=True)
     Y_trn = label_encoder_multilabel.fit_transform(labels_tr)
     Y_tst = label_encoder_multilabel.fit_transform(labels_te)
 
