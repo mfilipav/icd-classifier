@@ -423,7 +423,7 @@ def load_codes_and_descriptions(train_path, number_labels):
                 next(lr)
                 for row in lr:
                     for code in row[3].split(';'):
-                        codes.add(str(code))
+                        codes.add(code)
             logging.info(
                 "Done loading code descriptions for split: {}".format(split))
         codes = set([c for c in codes if c != ''])
@@ -439,6 +439,7 @@ def load_codes_and_descriptions(train_path, number_labels):
     ind2c = defaultdict(str, {i: c for i, c in enumerate(sorted(codes))})
 
     # this is new, to deal with the fact that in XML clf
+    # we want to use code descriptions, but some labels don't have them at all
     logging.info("Codes in ind2c: {}, {}".format(type(ind2c), len(ind2c)))
     bad_codes = []
     for item in ind2c.copy().items():
