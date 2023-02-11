@@ -65,3 +65,24 @@ XR-Linear (pecos)
 ```
 python icd_classifier/modeling/xml_clf.py --train_file data/processed/train_50.csv --test_file data/processed/dev_50.csv --number_labels 50 --topk 5
 ```
+
+
+## Transformer embeddings
+
+for dataset embeddings, use https://github.com/amzn/pecos/tree/mainline/examples/xr-transformer-neurips21#getting-xr-transformer-embeddings
+
+```
+model_dir="pecos/encoders/wiki10-31k/roberta"
+python3 -m pecos.xmc.xtransformer.encode --text-path pecos/mimic3/X.trn.txt --model-folder ${model_dir} --batch-gen-workers 16 --save-emb-path pecos/mimic3/X.emb.trn.npy --batch-size 128 --use-gpu True --verbose-level 3
+```
+
+label encoding
+```
+python3 -m pecos.xmc.xtransformer.encode --text-path pecos/mimic3/Z.all.txt --model-folder ${model_dir} --batch-gen-workers 16 --save-emb-path pecos/mimic3/Z.emb.all.npy --batch-size 128 --use-gpu True --verbose-level 3
+```
+
+see venv/lib/python3.10/site-packages/pecos/xmc/xtransformer/train.py
+load label features
+    label_feat = smat_util.load_matrix(args.label_feat_path, dtype=np.float32)
+or:
+    label_feat = LabelEmbeddingFactory.pifa(Y_trn, X_trn)

@@ -2,8 +2,10 @@ import argparse
 import sys
 import os
 import time
+from collections import defaultdict
 import pandas as pd
 import numpy as np
+import csv
 from sklearn.preprocessing import MultiLabelBinarizer
 from pecos.utils.featurization.text.vectorizers import Vectorizer
 from pecos.xmc.xlinear.model import XLinearModel
@@ -11,7 +13,8 @@ from pecos.xmc import Indexer, LabelEmbeddingFactory
 from pecos.utils import smat_util
 from icd_classifier.data.data_utils import load_codes_and_descriptions
 from icd_classifier.modeling import evaluation
-from icd_classifier.settings import MODEL_DIR
+from icd_classifier.modeling import tools
+from icd_classifier.settings import MODEL_DIR, DATA_DIR
 import logging
 
 
@@ -95,7 +98,8 @@ def get_code_to_desc_dict(desc_dict, c2ind):
 
 
 def prepare_x_z_corpus_files(
-        train_df, code_to_desc_dict, path_x, path_z, path_corpus):
+        train_df, test_df, code_to_desc_dict, path_x_trn,
+        path_x_tst, path_z, path_corpus):
     dfz = pd.DataFrame.from_dict(
         code_to_desc_dict, orient='index',
         columns=['description'], dtype='object')
@@ -105,8 +109,11 @@ def prepare_x_z_corpus_files(
         f"Prepared label description file {path_z}, line number "
         "corresponds to code in c2ind")
     train_df.iloc[:, 2].to_csv(
-        path_or_buf=path_x, index=False, header=False)
-    logging.info(f"Prepared training text file: {path_x}")
+        path_or_buf=path_x_trn, index=False, header=False)
+    logging.info(f"Prepared training text file: {path_x_trn}")
+    test_df.iloc[:, 2].to_csv(
+        path_or_buf=path_x_tst, index=False, header=False)
+    logging.info(f"Prepared testing/dev text file: {path_x_tst}")
 
     # concate Z and X.trn into joint corpus
     # cat ./X.trn.txt Z.all.txt > pecos_50/full_corpus.txt
@@ -119,13 +126,25 @@ def prepare_x_z_corpus_files(
         description corpus: {path_corpus}")
 
 
-def encode_y_labels(train_df, test_df, label_name, c2ind, ind_list):
+def encode_y_labels(train_df, test_df, label_name, c2ind,
+                    ind_list, prepare_text_files, number_labels):
     # prepare list of all labels:
     # get labels for datesets into a list of tuples
     labels_tr = get_label_tuples(
         train_df, label_name, return_idx=True, c2ind=c2ind)
     labels_te = get_label_tuples(
         test_df, label_name, return_idx=True, c2ind=c2ind)
+
+    if prepare_text_files:
+        path_y_trn = DATA_DIR+'/Y.trn.'+str(number_labels)+'.txt'
+        path_y_tst = DATA_DIR+'/Y.tst.'+str(number_labels)+'.txt'
+
+        with open(path_y_trn, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(labels_tr)
+        with open(path_y_tst, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(labels_te)
 
     # create multihot label encoding, CSR matrix
     logging.info("Preparing CSR matrices for Y train, test")
@@ -138,17 +157,21 @@ def encode_y_labels(train_df, test_df, label_name, c2ind, ind_list):
     Y_trn = Y_trn.astype(dtype=np.float32, copy=False)
     Y_tst = Y_tst.astype(dtype=np.float32, copy=False)
 
+    # Y_trn is a csr matrix with a shape (47719, 8887) and
+    # 745363 non-zero values.
     logging.info(
         f"Y_trn is a {Y_trn.getformat()} matrix with a shape {Y_trn.shape} "
-        "and {Y_trn.nnz} non-zero values.")
+        f"and {Y_trn.nnz} non-zero values.")
     logging.info(
         f"Y_tst is a {Y_tst.getformat()} matrix with a shape {Y_tst.shape} "
-        "and {Y_tst.nnz} non-zero values.")
+        f"and {Y_tst.nnz} non-zero values.")
+
     return Y_trn, Y_tst
 
 
 def prepare_x_y_csr_matrices(
-        train_file, test_file, number_labels, prepare_text_files=True):
+        train_file, test_file, number_labels,
+        prepare_text_files, load_label_embeddings_from):
 
     """
     Featurize text features into TFIDF or Sentencepiece vectors
@@ -170,24 +193,25 @@ def prepare_x_y_csr_matrices(
     logging.info(f"code_to_desc_dict len: {len(code_to_desc_dict)}")
     assert len(code_to_desc_dict) == len(c2ind)
 
-    path_corpus = 'data/processed/pecos_corpus_'+str(number_labels)+'.txt'
-    path_z = 'data/processed/Z.all.txt'
-    path_x = 'data/processed/X.trn.txt'
+    path_corpus = DATA_DIR+'/pecos_corpus.'+str(number_labels)+'.txt'
+    path_z = DATA_DIR+'/Z.all.'+str(number_labels)+'.txt'
+    path_x_trn = DATA_DIR+'/X.trn.'+str(number_labels)+'.txt'
+    path_x_tst = DATA_DIR+'/X.tst.'+str(number_labels)+'.txt'
+
     if prepare_text_files:
         prepare_x_z_corpus_files(
-            train_df, code_to_desc_dict, path_x, path_z, path_corpus)
+            train_df, test_df, code_to_desc_dict, path_x_trn, path_x_tst,
+            path_z, path_corpus)
 
     # 1. Encode labels, Y
     label_name = "LABELS"
     Y_trn, Y_tst = encode_y_labels(
-        train_df, test_df, label_name, c2ind, ind_list)
+        train_df, test_df, label_name, c2ind,
+        ind_list, prepare_text_files, number_labels)
 
     # 2. Encode text features, X
     # TODO: parameterize TFIDF, NGRAM range
-    # we adopt n-gram TFIDF features containing word unigrams,
-    # word bigrams, and character trigrams.
-    # Note that each of the n-gram feature can have different hyper-parameters,
-    # such as max_feature and max_df, based on corpus size!!    
+    # see pecos/utils/featurization/text/vectorizers.py::train()
     text_feature = "TEXT"
     vectorizer_config = {
         "type": "tfidf",
@@ -198,7 +222,8 @@ def prepare_x_y_csr_matrices(
                     "min_df_cnt": 0,  # try 5 or 3
                     "max_df_ratio": 0.98,
                     "truncate_length": -1,
-                    "add_one_idf": False,  # try True
+                    "smooth_idf": True,
+                    "add_one_idf": True,  # try True
                     "analyzer": "word",
                 },
                 # {
@@ -221,7 +246,9 @@ def prepare_x_y_csr_matrices(
     # 3. Train vectorizer
     # vectorizer = Vectorizer.train(
     #   trn_corpus=train_texts, config=vectorizer_config)
-    logging.info(f"Train vectorizer from corpus: {path_corpus}")
+    logging.info(
+        "Train {} vectorizer from corpus: {}".format(
+            vectorizer_config.get("type"), path_corpus))
     vectorizer = Vectorizer.train(
         trn_corpus=path_corpus,
         config=vectorizer_config)
@@ -229,14 +256,24 @@ def prepare_x_y_csr_matrices(
     # 4. Fit vectorizer to X train and test, and Z
     X_trn = vectorizer.predict(train_texts)
     logging.info(
-        f"The train file consists of {X_trn.shape[0]} instances \
-        with {X_trn.shape[1]}-dimensional features \
-        in a {X_trn.getformat()} matrix.")
+        f"The train file consists of {X_trn.shape[0]} instances "
+        f"with {X_trn.shape[1]}-dimensional features "
+        f"in a {X_trn.getformat()} matrix.")
     X_tst = vectorizer.predict(test_texts)
-    Z_all = vectorizer.predict(list(code_to_desc_dict.values()))
+
+    if load_label_embeddings_from:
+        logging.info(
+            f"Load Z label embeddings from:{load_label_embeddings_from}")
+        Z_all = XLinearModel.load_feature_matrix(
+            load_label_embeddings_from)
+    else:
+        # Prepare TFIDF label embeddings
+        Z_all = vectorizer.predict(list(code_to_desc_dict.values()))
     logging.info(
-        f"Text feature: {text_feature}, train shape: {X_trn.shape}, \
-        test shape: {X_tst.shape}, Z_all shape: {Z_all.shape}")
+        f"Text feature: {text_feature}, X_trn shape: {X_trn.shape}, "
+        f"X_trn type: {type(X_trn)}, "
+        f"X_tst shape: {X_tst.shape}, Z_all shape: {Z_all.shape}, "
+        f"Z_all type: {type(Z_all)}")
 
     return X_trn, X_tst, Y_trn, Y_tst, Z_all
 
@@ -244,41 +281,41 @@ def prepare_x_y_csr_matrices(
 def main(args):
     train_file, test_file = args.train_file, args.test_file
     number_labels, topk = args.number_labels, args.topk
+    b_partitions = args.b_partitions
     model, load_model_from, hlt = args.model, args.load_model_from, args.hlt
+    load_label_embeddings_from = args.load_label_embeddings_from
+    prepare_text_files = args.prepare_text_files
 
     X_trn, X_tst, Y_trn, Y_tst, Z_all = prepare_x_y_csr_matrices(
         train_file, test_file, number_labels,
-        prepare_text_files=args.prepare_text_files)
+        prepare_text_files,
+        load_label_embeddings_from)
 
     if hlt:
-        logging.info("Prepare PIFA hierarchical label tree (HLT)")
-        Z_pifa_concat = LabelEmbeddingFactory.create(
-            Y_trn, X_trn, Z=Z_all, method="pifa_lf_concat")
-
-        logging.info("Generate cluster chain with PIFA, hierarchical k means")
-        """
-        nr_splits: int = 16
-        min_codes: int = None  # type: ignore
-        max_leaf_size: int = 100
-        spherical: bool = True
-        seed: int = 0
-        kmeans_max_iter: int = 20
-        threads: int = -1
-
-        # paramters for sampling of hierarchical clustering
-        do_sample: bool = False
-        max_sample_rate: float = 1.0
-        min_sample_rate: float = 0.1
-        warmup_ratio: float = 0.4
-        """
-        cluster_chain = Indexer.gen(
-            Z_pifa_concat, indexer_type="hierarchicalkmeans",
-            max_leaf_size=128, nr_splits=128, verbose=1)
         logging.info(
-            f"{len(cluster_chain)} layers in the trained hierarchical label \
-            tree with C[d] as:")
+            "Prepare hierarchical label tree (HLT), label features Z and "
+            "cluster chain C")
+        if load_label_embeddings_from:
+            logging.info("Construct label features Z by applying text "
+                         "vectorizers on label text")
+            Z = Z_all
+        else:
+            logging.info("Construct label features Z by applying PIFA "
+                         "clustering")
+            Z = LabelEmbeddingFactory.create(
+                Y_trn, X_trn, Z=Z_all, method="pifa_lf_concat")
+
+        logging.info("Recursively generate label cluster chain, with cluster"
+                     f"size B={b_partitions}")
+        cluster_chain = Indexer.gen(
+            feat_mat=Z, indexer_type="hierarchicalkmeans",
+            max_leaf_size=100, nr_splits=b_partitions,
+            spherical=True, do_sample=False, verbose=3)
+        logging.debug(
+            f"{len(cluster_chain)} layers in the trained hierarchical label "
+            "tree with C[d] as:")
         for d, C in enumerate(cluster_chain):
-            logging.info(
+            logging.debug(
                 f"cluster_chain[{d}] is a {C.getformat()} matrix of \
                 shape {C.shape}")
     else:
@@ -292,14 +329,21 @@ def main(args):
         # C is cluster chain, if given, will speed up model training!
         xlm = XLinearModel.train(
             X=X_trn, Y=Y_trn, C=cluster_chain,
-            negative_sampling_scheme="tfn")
+            label_feature_path=load_label_embeddings_from,
+            negative_sampling_scheme="tfn", verbose=3)
+
+        for d, m in enumerate(xlm.model.model_chain):
+            logging.debug(
+                f"model_chain[{d}].W is a {m.W.getformat()} "
+                f"matrix of shape {m.W.shape}")
 
         # Save model
         hlt_flag = 'hlt' if hlt else ''
         model_dir = os.path.join(MODEL_DIR, '_'.join(
             [
-                "pecos", model, train_file.split("/")[-1].split(".")[-2],
+                "xmc", model, train_file.split("/")[-1].split(".")[-2],
                 "topk", str(topk), hlt_flag,
+                "b_partitions", str(b_partitions),
                 time.strftime('%Y%m%d_%H%M%S', time.localtime())
             ])
         )
@@ -311,14 +355,16 @@ def main(args):
     logging.info("Predict")
     Y_pred_logits = xlm.predict(X_tst, beam_size=10, only_topk=topk)
     Y_pred = np.where(Y_pred_logits.toarray() > 0, 1, 0)
+    Y_trn_pred_logits = xlm.predict(X_trn, beam_size=10, only_topk=topk)
+    Y_trn_pred = np.where(Y_trn_pred_logits.toarray() > 0, 1, 0)
 
     # Evaluate
     logging.debug(
         "Y_pred_logits, shape: {}, 1st array: {}".format(
             Y_pred_logits.shape, Y_pred_logits[0].toarray()))
     logging.debug(
-        "Y_pred, shape: {}, 1st array: {}".format(
-            Y_pred.shape, Y_pred[0]))
+        "Y_pred, shape: {}, 1st array nnz: {}".format(
+            Y_pred.shape, np.count_nonzero(Y_pred[0])))
     logging.debug(
         "Y_tst, shape: {}, 1st array: {}".format(
             Y_tst.shape, Y_tst[0].toarray()))
@@ -330,10 +376,27 @@ def main(args):
     logging.info("Metrics from evaluation.all_metrics")
 
     metrics = evaluation.all_metrics(
-        yhat=Y_pred, y=Y_tst.toarray(), k=topk, yhat_raw=Y_pred_logits.toarray())
-
+        yhat=Y_pred, y=Y_tst.toarray(),
+        k=topk, yhat_raw=Y_pred_logits.toarray())
     logging.info("metrics after evaluation: {}".format(metrics))
     evaluation.print_metrics(metrics)
+
+    metrics_tr = evaluation.all_metrics(
+        yhat=Y_trn_pred, y=Y_trn.toarray(),
+        k=topk, yhat_raw=Y_trn_pred_logits.toarray())
+    logging.info("metrics of trn set after evaluation: {}".format(metrics))
+    evaluation.print_metrics(metrics_tr)
+
+    # Save metrics to model dir
+    logging.info("Preparing and saving metrics")
+    metrics_hist = defaultdict(lambda: [])
+    metrics_hist_tr = defaultdict(lambda: [])
+    for name in metrics.keys():
+        metrics_hist[name].append(metrics[name])
+    for name in metrics_tr.keys():
+        metrics_hist_tr[name].append(metrics_tr[name])
+    metrics_hist_all = (metrics_hist, metrics_hist, metrics_hist_tr)
+    tools.save_metrics(metrics_hist_all, model_dir)
 
 
 if __name__ == "__main__":
@@ -350,7 +413,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--topk", type=int, default=8, help="k value for precision/recall@k")
     parser.add_argument(
+        "--b_partitions", type=int, default=16,
+        help="B value for B-ary (recursive) partitioning of label set")
+    parser.add_argument(
         "--load_model_from", type=str, default=None)
+    parser.add_argument(
+        "--load_label_embeddings_from", type=str, default=None)
     parser.add_argument(
         "--prepare_text_files", action="store_const", required=False,
         const=True)

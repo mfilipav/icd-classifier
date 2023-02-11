@@ -132,7 +132,7 @@ def save_params_dict(params):
 def write_preds(yhat, model_dir, hids, fold, ind2c, yhat_raw=None):
     """
         INPUTS:
-            yhat: binary predictions matrix 
+            yhat: binary predictions matrix
             model_dir: which directory to save in
             hids: list of hadm_id's to save along with predictions
             fold: train, dev, or test

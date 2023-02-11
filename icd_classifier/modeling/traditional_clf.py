@@ -149,15 +149,15 @@ def read_bows(bow_fname, c2ind, model):
             label_set = set([c2ind[c] for c in code_str.split(';')])
             y.append([1 if j in label_set else 0 for j in range(num_labels)])
             hids.append(hid)
-            if i < 3:
-                logging.debug(
-                    "Read bow file row {}: {}".format(i, row))
-                logging.debug(
-                    "Len Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
-                        len(data), len(row_ind), len(col_ind), len(y)))
-                logging.debug(
-                    "Val Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
-                        data, row_ind, col_ind, y))
+            # if i < 3:
+            #     logging.debug(
+            #         "Read bow file row {}: {}".format(i, row))
+            #     logging.debug(
+            #         "Len Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
+            #             len(data), len(row_ind), len(col_ind), len(y)))
+            #     logging.debug(
+            #         "Val Data: {}, row_ind: {}, col_ind: {}, y: {}".format(
+            #             data, row_ind, col_ind, y))
 
         X = csr_matrix((data, (row_ind, col_ind)))
         if model == 'xr_linear':
@@ -388,6 +388,9 @@ def main(args):
     logging.info(
         "Predicting on dev set. Example from yhat: {}".format(yhat[0]))
 
+    logging.debug(
+        "yhat raw: {}".format(yhat_raw[0]))
+
     # deal with labels that don't have positive training examples
     logging.info("Reshaping output to deal with labels missing from train set")
     labels_with_examples = set(labels_with_examples)
@@ -403,6 +406,9 @@ def main(args):
     # evaluate
     # Precision@5 for top 50 labels experiment; @8/15 for 'full'
     logging.info("Evaluating on dev set...")
+    logging.debug(
+        f"yhat_full: type: {type(yhat_full)}, shape: \
+        {yhat_full.shape}, values: {yhat_full}")
     k = 5 if args.number_labels == 50 else [8, 15]
 
     # only Logistic Regression and SCV provide probabilities
