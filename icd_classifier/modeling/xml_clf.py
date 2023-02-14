@@ -2,11 +2,11 @@ import argparse
 import sys
 import os
 import time
-from collections import defaultdict
-import pandas as pd
+import logging
+import json
 import numpy as np
-import csv
-from sklearn.preprocessing import MultiLabelBinarizer
+import pandas as pd
+from collections import defaultdict
 from pecos.utils.featurization.text.vectorizers import Vectorizer
 from pecos.xmc.xlinear.model import XLinearModel
 from pecos.xmc import Indexer, LabelEmbeddingFactory
@@ -15,163 +15,13 @@ from icd_classifier.data.data_utils import load_codes_and_descriptions
 from icd_classifier.modeling import evaluation
 from icd_classifier.modeling import tools
 from icd_classifier.settings import MODEL_DIR, DATA_DIR
-import logging
-
-
-def convert_label_codes_to_idx(data, c2ind):
-    """
-    for all train/test examples, convert code labels to idx labels,
-    according to c2ind dict:
-    [
-        ('801.35', '348.4', '805.06', '807.01', '998.30', '707.24',
-         'E880.9','427.31', '414.01', '401.9', 'V58.61', 'V43.64',
-         '707.00', 'E878.1', '96.71'),
-        ('852.25', 'E888.9', '403.90', '585.9', '250.00', '414.00',
-         'V45.81', '96.71')
-    ]
-    -->
-    [
-        (6106, 1910, 6204, 6241, 7906, 4683,
-         8160, 2720, 2611, 2534, 8806, 8683,
-         4663, 8140, 7575),
-        (6775, 8186, 2545, 4009, 985, 2610,
-         8717, 7575)
-    ]
-    """
-    logging.info(
-        "Convert labels from code to idx, according to c2ind of "
-        "length: {}".format(len(c2ind)))
-    converted_data = []
-    for i, item in enumerate(data):
-        item_labels = []
-        for label in item:
-            idx = c2ind.get(label)
-            if idx is not None:
-                item_labels.append(idx)
-            # else:
-            #     logging.warning(
-            #         "label not found: {} in c2ind, data item: {}".format(
-            #             label, i))
-        converted_data.append(tuple(item_labels))
-    logging.info(
-        "Done. First two data items before conversion: {}, and after: {}"
-        "".format(data[0:2], converted_data[0:2]))
-
-    return converted_data
-
-
-def get_label_tuples(df, label_name, return_idx=True, c2ind=None):
-    logging.info(
-        f"Getting list of labels from df['{label_name}'], "
-        "return_idx={return_idx}")
-    list_of_lists = []
-    for joined_label in df[label_name].tolist():
-        list_of_lists.append(tuple(joined_label.split(";")))
-    if return_idx and c2ind:
-        list_of_lists = convert_label_codes_to_idx(list_of_lists, c2ind)
-    logging.info(f"Done. Labels of first two items: {list_of_lists[0:2]}")
-    return list_of_lists
-
-
-def get_code_to_desc_dict(desc_dict, c2ind):
-    """
-    returns dict with items {code: description}
-    where 'code' is from c2ind dict, and
-    'description' is from description dict
-    'desc_dict', where keys are 'code'
-
-    {
-        '017.21': 'Tuberculosis of peripheral lymph nodes, bacteriological or
-            histological examination not done',
-        '017.22': 'Tuberculosis of peripheral lymph nodes..',
-    }
-    """
-    code_to_desc_dict = {}
-    for item in c2ind.items():
-        code = item[0]
-        value = desc_dict.get(code)
-        if value is not None:
-            code_to_desc_dict[code] = desc_dict.get(code)
-        else:
-            logging.error(f"something wrong with {code}, c2ind item: {item}")
-    return code_to_desc_dict
-
-
-def prepare_x_z_corpus_files(
-        train_df, test_df, code_to_desc_dict, path_x_trn,
-        path_x_tst, path_z, path_corpus):
-    dfz = pd.DataFrame.from_dict(
-        code_to_desc_dict, orient='index',
-        columns=['description'], dtype='object')
-    dfz.iloc[:, 0].to_csv(
-        path_or_buf=path_z, index=False, header=False)
-    logging.info(
-        f"Prepared label description file {path_z}, line number "
-        "corresponds to code in c2ind")
-    train_df.iloc[:, 2].to_csv(
-        path_or_buf=path_x_trn, index=False, header=False)
-    logging.info(f"Prepared training text file: {path_x_trn}")
-    test_df.iloc[:, 2].to_csv(
-        path_or_buf=path_x_tst, index=False, header=False)
-    logging.info(f"Prepared testing/dev text file: {path_x_tst}")
-
-    # concate Z and X.trn into joint corpus
-    # cat ./X.trn.txt Z.all.txt > pecos_50/full_corpus.txt
-    corpus = pd.concat(
-        [dfz.iloc[:, 0], train_df.iloc[:, 2]], axis=0, join='outer')
-    corpus.to_csv(
-        path_or_buf=path_corpus, index=False, header=False)
-    logging.info(
-        f"Prepared a joint training text and label \
-        description corpus: {path_corpus}")
-
-
-def encode_y_labels(train_df, test_df, label_name, c2ind,
-                    ind_list, prepare_text_files, number_labels):
-    # prepare list of all labels:
-    # get labels for datesets into a list of tuples
-    labels_tr = get_label_tuples(
-        train_df, label_name, return_idx=True, c2ind=c2ind)
-    labels_te = get_label_tuples(
-        test_df, label_name, return_idx=True, c2ind=c2ind)
-
-    if prepare_text_files:
-        path_y_trn = DATA_DIR+'/Y.trn.'+str(number_labels)+'.txt'
-        path_y_tst = DATA_DIR+'/Y.tst.'+str(number_labels)+'.txt'
-
-        with open(path_y_trn, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerows(labels_tr)
-        with open(path_y_tst, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerows(labels_te)
-
-    # create multihot label encoding, CSR matrix
-    logging.info("Preparing CSR matrices for Y train, test")
-    label_encoder_multilabel = MultiLabelBinarizer(
-        classes=ind_list, sparse_output=True)
-    Y_trn = label_encoder_multilabel.fit_transform(labels_tr)
-    Y_tst = label_encoder_multilabel.fit_transform(labels_te)
-
-    # cast as correct dtype
-    Y_trn = Y_trn.astype(dtype=np.float32, copy=False)
-    Y_tst = Y_tst.astype(dtype=np.float32, copy=False)
-
-    # Y_trn is a csr matrix with a shape (47719, 8887) and
-    # 745363 non-zero values.
-    logging.info(
-        f"Y_trn is a {Y_trn.getformat()} matrix with a shape {Y_trn.shape} "
-        f"and {Y_trn.nnz} non-zero values.")
-    logging.info(
-        f"Y_tst is a {Y_tst.getformat()} matrix with a shape {Y_tst.shape} "
-        f"and {Y_tst.nnz} non-zero values.")
-
-    return Y_trn, Y_tst
+from icd_classifier.modeling.tools import (
+    get_code_to_desc_dict, prepare_x_z_corpus_files, encode_y_labels)
 
 
 def prepare_x_y_csr_matrices(
         train_file, test_file, number_labels,
-        prepare_text_files, load_label_embeddings_from):
+        prepare_text_files, label_feat_path):
 
     """
     Featurize text features into TFIDF or Sentencepiece vectors
@@ -197,11 +47,18 @@ def prepare_x_y_csr_matrices(
     path_z = DATA_DIR+'/Z.all.'+str(number_labels)+'.txt'
     path_x_trn = DATA_DIR+'/X.trn.'+str(number_labels)+'.txt'
     path_x_tst = DATA_DIR+'/X.tst.'+str(number_labels)+'.txt'
+    path_code_to_desc_dict = \
+        DATA_DIR+'/code_to_desc_dict.'+str(number_labels)+'.json'
+    path_c2ind_dict = DATA_DIR+'/c2ind_dict.'+str(number_labels)+'.json'
 
     if prepare_text_files:
         prepare_x_z_corpus_files(
             train_df, test_df, code_to_desc_dict, path_x_trn, path_x_tst,
             path_z, path_corpus)
+        with open(path_code_to_desc_dict, "w") as outfile:
+            json.dump(code_to_desc_dict, outfile)
+        with open(path_c2ind_dict, "w") as outfile:
+            json.dump(c2ind, outfile)
 
     # 1. Encode labels, Y
     label_name = "LABELS"
@@ -223,7 +80,7 @@ def prepare_x_y_csr_matrices(
                     "max_df_ratio": 0.98,
                     "truncate_length": -1,
                     "smooth_idf": True,
-                    "add_one_idf": True,  # try True
+                    "add_one_idf": False,
                     "analyzer": "word",
                 },
                 # {
@@ -261,11 +118,11 @@ def prepare_x_y_csr_matrices(
         f"in a {X_trn.getformat()} matrix.")
     X_tst = vectorizer.predict(test_texts)
 
-    if load_label_embeddings_from:
+    if label_feat_path:
         logging.info(
-            f"Load Z label embeddings from:{load_label_embeddings_from}")
+            f"Load Z label embeddings from:{label_feat_path}")
         Z_all = XLinearModel.load_feature_matrix(
-            load_label_embeddings_from)
+            label_feat_path)
     else:
         # Prepare TFIDF label embeddings
         Z_all = vectorizer.predict(list(code_to_desc_dict.values()))
@@ -283,21 +140,21 @@ def main(args):
     number_labels, topk = args.number_labels, args.topk
     b_partitions = args.b_partitions
     model, load_model_from, hlt = args.model, args.load_model_from, args.hlt
-    load_label_embeddings_from = args.load_label_embeddings_from
+    label_feat_path = args.label_feat_path
     prepare_text_files = args.prepare_text_files
 
     X_trn, X_tst, Y_trn, Y_tst, Z_all = prepare_x_y_csr_matrices(
         train_file, test_file, number_labels,
         prepare_text_files,
-        load_label_embeddings_from)
+        label_feat_path)
 
     if hlt:
         logging.info(
             "Prepare hierarchical label tree (HLT), label features Z and "
             "cluster chain C")
-        if load_label_embeddings_from:
-            logging.info("Construct label features Z by applying text "
-                         "vectorizers on label text")
+        if label_feat_path:
+            logging.info("Construct label features Z from embedding: "
+                         "{}".format(label_feat_path))
             Z = Z_all
         else:
             logging.info("Construct label features Z by applying PIFA "
@@ -328,8 +185,7 @@ def main(args):
         logging.info("Train a new XLinearModel")
         # C is cluster chain, if given, will speed up model training!
         xlm = XLinearModel.train(
-            X=X_trn, Y=Y_trn, C=cluster_chain,
-            label_feature_path=load_label_embeddings_from,
+            X=X_trn, Y=Y_trn, c=cluster_chain,
             negative_sampling_scheme="tfn", verbose=3)
 
         for d, m in enumerate(xlm.model.model_chain):
@@ -369,22 +225,21 @@ def main(args):
         "Y_tst, shape: {}, 1st array: {}".format(
             Y_tst.shape, Y_tst[0].toarray()))
 
-    logging.info("Results from Pecos:")
+    logging.info("Testing Results from Pecos:")
     metrics = smat_util.Metrics.generate(tY=Y_tst, pY=Y_pred_logits, topk=topk)
     logging.info(f"\nrecall: {metrics.recall} \nprecision: {metrics.prec}")
 
     logging.info("Metrics from evaluation.all_metrics")
-
     metrics = evaluation.all_metrics(
         yhat=Y_pred, y=Y_tst.toarray(),
         k=topk, yhat_raw=Y_pred_logits.toarray())
-    logging.info("metrics after evaluation: {}".format(metrics))
+    logging.info("metrics after TEST/DEV evaluation: {}".format(metrics))
     evaluation.print_metrics(metrics)
 
     metrics_tr = evaluation.all_metrics(
         yhat=Y_trn_pred, y=Y_trn.toarray(),
         k=topk, yhat_raw=Y_trn_pred_logits.toarray())
-    logging.info("metrics of trn set after evaluation: {}".format(metrics))
+    logging.info("metrics after TRAIN evaluation: {}".format(metrics))
     evaluation.print_metrics(metrics_tr)
 
     # Save metrics to model dir
@@ -418,7 +273,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--load_model_from", type=str, default=None)
     parser.add_argument(
-        "--load_label_embeddings_from", type=str, default=None)
+        "--label_feat_path", type=str, default=None)
     parser.add_argument(
         "--prepare_text_files", action="store_const", required=False,
         const=True)

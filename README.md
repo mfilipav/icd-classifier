@@ -68,7 +68,17 @@ python icd_classifier/modeling/xml_clf.py --train_file data/processed/train_50.c
 
 
 ## Transformer embeddings
+Must install `sentence-transformers` library from https://www.sbert.net/docs/installation.html
+Then, use `icd_classifier.modeling.tools.embed_text_file()` method to encode label descriptions Z
 
+
+Sentence emebddings tested:
+https://huggingface.co/sentence-transformers/all-mpnet-base-v2
+https://huggingface.co/pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb
+https://huggingface.co/gsarti/biobert-nli
+
+
+Pecos example embeddings:
 for dataset embeddings, use https://github.com/amzn/pecos/tree/mainline/examples/xr-transformer-neurips21#getting-xr-transformer-embeddings
 
 ```

@@ -3,6 +3,7 @@
 data/processed/
 data/raw/
 data/pecos
+data/sentence_embeddings
 pecos/
 project_planning.md
 models/

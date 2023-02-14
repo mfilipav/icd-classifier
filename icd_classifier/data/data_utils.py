@@ -442,14 +442,14 @@ def load_codes_and_descriptions(train_path, number_labels):
     # we want to use code descriptions, but some labels don't have them at all
     logging.info("Codes in ind2c: {}, {}".format(type(ind2c), len(ind2c)))
     bad_codes = []
-    for item in ind2c.copy().items():
+    for item in ind2c.items():
         code = item[1]
-        key = item[0]
+        # key = item[0]
         found_value = desc_dict.get(code)
         if found_value is None:
-            logging.warning('code: {} not found in desc_dict'.format(code))
+            logging.warning("code: '{}' not found in desc_dict".format(code))
             bad_codes.append(item)
-            ind2c.pop(key)
+            # ind2c.pop(key)
     logging.info("Codes in ind2c: {}".format(len(ind2c)))
     logging.info("Codes from ind2c not found in desc_dict: {}, "
                  "codes: {}".format(len(bad_codes), bad_codes))

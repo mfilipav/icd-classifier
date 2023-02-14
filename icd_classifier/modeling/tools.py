@@ -2,11 +2,12 @@ import torch
 import csv
 import json
 import numpy as np
-
+import pandas as pd
 from icd_classifier.modeling import models
-from icd_classifier.settings import *
+from icd_classifier.settings import DATA_DIR
 from icd_classifier.data import data_utils
 import logging
+from sklearn.preprocessing import MultiLabelBinarizer
 
 
 def pick_model(args, dicts):
@@ -199,3 +200,192 @@ def save_everything(args, metrics_hist_all, model, model_dir,
                     model.cuda()
     logging.info("Saved metrics, params, model to directory: {}".format(
         model_dir))
+
+
+def embed_text_file(model_name, text_file, embeddings_file):
+    """
+    Usage:
+    model_name = 'all-mpnet-base-v2'
+    model_name = 'BioBERT-mnli-snli-scinli-scitail-mednli-stsb'
+    model_full_name = 'pritamdeka/'+model_name
+    text_file = 'data/processed/Z.all.full.txt'
+    embeddings_file = 'data/processed/Z.emb.all.'+model_name+'.npy'
+
+    embed_text_file(model_full_name, text_file, embeddings_file)
+    """
+
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer(model_name)
+
+    with open(text_file) as f:
+        sentences = f.readlines()
+
+    sentences = [sentence.rstrip('\n') for sentence in sentences]
+    print(len(sentences))
+
+    embeddings = model.encode(sentences)
+
+    print(embeddings.shape)
+    embeddings = model.encode(sentences)
+
+    np.save(embeddings_file, embeddings)
+
+
+def convert_label_codes_to_idx(data, c2ind):
+    """
+    for all train/test examples, convert code labels to idx labels,
+    according to c2ind dict:
+    [
+        ('801.35', '348.4', '805.06', '807.01', '998.30', '707.24',
+         'E880.9','427.31', '414.01', '401.9', 'V58.61', 'V43.64',
+         '707.00', 'E878.1', '96.71'),
+        ('852.25', 'E888.9', '403.90', '585.9', '250.00', '414.00',
+         'V45.81', '96.71')
+    ]
+    -->
+    [
+        (6106, 1910, 6204, 6241, 7906, 4683,
+         8160, 2720, 2611, 2534, 8806, 8683,
+         4663, 8140, 7575),
+        (6775, 8186, 2545, 4009, 985, 2610,
+         8717, 7575)
+    ]
+    """
+    logging.info(
+        "Convert labels from code to idx, according to c2ind of "
+        "length: {}".format(len(c2ind)))
+    converted_data = []
+    for i, item in enumerate(data):
+        item_labels = []
+        for label in item:
+            idx = c2ind.get(label)
+            if idx is not None:
+                item_labels.append(idx)
+            # else:
+            #     logging.warning(
+            #         "label not found: {} in c2ind, data item: {}".format(
+            #             label, i))
+        converted_data.append(tuple(item_labels))
+    logging.info(
+        "Done. First two data items before conversion: {}, and after: {}"
+        "".format(data[0:2], converted_data[0:2]))
+    logging.info(
+        "Last 5 data items before conversion: {}, and after: {}"
+        "".format(data[-5:], converted_data[-5:]))
+
+    return converted_data
+
+
+def get_label_tuples(df, label_name, return_idx=True, c2ind=None):
+    logging.info(
+        f"Getting list of labels from df['{label_name}'], "
+        "return_idx={return_idx}")
+    list_of_lists = []
+    for joined_label in df[label_name].tolist():
+        list_of_lists.append(tuple(joined_label.split(";")))
+    if return_idx and c2ind:
+        list_of_lists = convert_label_codes_to_idx(list_of_lists, c2ind)
+    return list_of_lists
+
+
+def get_code_to_desc_dict(desc_dict, c2ind):
+    """
+    returns dict with items {code: description}
+    where 'code' is from c2ind dict, and
+    'description' is from description dict
+    'desc_dict', where keys are 'code'
+
+    {
+        '017.21': 'Tuberculosis of peripheral lymph nodes, bacteriological or
+            histological examination not done',
+        '017.22': 'Tuberculosis of peripheral lymph nodes..',
+    }
+    """
+    code_to_desc_dict = {}
+    backup_code = None
+    for item in c2ind.items():
+        code = item[0]
+        value = desc_dict.get(code)
+        if value is not None:
+            code_to_desc_dict[code] = desc_dict.get(code)
+            backup_code = code
+        else:
+            code_to_desc_dict[code] = desc_dict.get(backup_code)
+            logging.error(
+                f"No desc for code: {code}, c2ind: {item}. Replace it with"
+                f" the previous code: {backup_code}")
+    return code_to_desc_dict
+
+
+def prepare_x_z_corpus_files(
+        train_df, test_df, code_to_desc_dict, path_x_trn,
+        path_x_tst, path_z, path_corpus):
+    dfz = pd.DataFrame.from_dict(
+        code_to_desc_dict, orient='index',
+        columns=['description'], dtype='object')
+    dfz.iloc[:, 0].to_csv(
+        path_or_buf=path_z, index=False, header=False)
+    logging.info(
+        f"Prepared label description file {path_z}, line number "
+        "corresponds to code in c2ind")
+    train_df.iloc[:, 2].to_csv(
+        path_or_buf=path_x_trn, index=False, header=False)
+    logging.info(f"Prepared training text file: {path_x_trn}")
+    test_df.iloc[:, 2].to_csv(
+        path_or_buf=path_x_tst, index=False, header=False)
+    logging.info(f"Prepared testing/dev text file: {path_x_tst}")
+
+    # concate Z and X.trn into joint corpus
+    # cat ./X.trn.txt Z.all.txt > pecos_50/full_corpus.txt
+    corpus = pd.concat(
+        [dfz.iloc[:, 0], train_df.iloc[:, 2]], axis=0, join='outer')
+    corpus.to_csv(
+        path_or_buf=path_corpus, index=False, header=False)
+    logging.info(
+        f"Prepared a joint training text and label \
+        description corpus: {path_corpus}")
+
+
+def encode_y_labels(train_df, test_df, label_name, c2ind,
+                    ind_list, prepare_text_files, number_labels):
+    # prepare list of all labels:
+    # get labels for datesets into a list of tuples
+    logging.info("get label tuples for train data")
+    labels_tr = get_label_tuples(
+        train_df, label_name, return_idx=True, c2ind=c2ind)
+    logging.info("get label tuples for test data")
+    labels_te = get_label_tuples(
+        test_df, label_name, return_idx=True, c2ind=c2ind)
+
+    if prepare_text_files:
+        path_y_trn = DATA_DIR+'/Y.trn.'+str(number_labels)+'.txt'
+        path_y_tst = DATA_DIR+'/Y.tst.'+str(number_labels)+'.txt'
+
+        with open(path_y_trn, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(labels_tr)
+        with open(path_y_tst, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(labels_te)
+
+    # create multihot label encoding, CSR matrix
+    logging.info("Preparing CSR matrices for Y train, test")
+    label_encoder_multilabel = MultiLabelBinarizer(
+        classes=ind_list, sparse_output=True)
+    Y_trn = label_encoder_multilabel.fit_transform(labels_tr)
+    Y_tst = label_encoder_multilabel.fit_transform(labels_te)
+
+    # cast as correct dtype
+    Y_trn = Y_trn.astype(dtype=np.float32, copy=False)
+    Y_tst = Y_tst.astype(dtype=np.float32, copy=False)
+
+    # Y_trn is a csr matrix with a shape (47719, 8887) and
+    # 745363 non-zero values.
+    logging.info(
+        f"Y_trn is a {Y_trn.getformat()} matrix with a shape {Y_trn.shape} "
+        f"and {Y_trn.nnz} non-zero values.")
+    logging.info(
+        f"Y_tst is a {Y_tst.getformat()} matrix with a shape {Y_tst.shape} "
+        f"and {Y_tst.nnz} non-zero values.")
+
+    return Y_trn, Y_tst
