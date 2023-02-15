@@ -16,13 +16,7 @@ def pick_model(args, dicts):
     """
     logging.info("Picking model: {}".format(args.model))
     number_labels = len(dicts['ind2c'])
-    if args.model == "log_reg":
-        model = models.LogReg(
-            number_labels, args.embeddings_file, args.lmbda, args.gpu, dicts,
-            args.pool,
-            args.embedding_size, args.dropout, args.codes_embeddings)
-
-    elif args.model == "basic_cnn":
+    if args.model == "basic_cnn":
         filter_size = int(args.filter_size)
         model = models.BasicCNN(
             number_labels, args.embeddings_file, filter_size, args.filter_maps,
@@ -30,24 +24,17 @@ def pick_model(args, dicts):
             dicts, args.embedding_size, args.dropout)
 
     elif args.model == "rnn":
-        logging.info(
-            type(number_labels), type(args.embeddings_file), type(dicts),
-            type(args.rnn_dim), type(args.rnn_cell_type),
-            type(args.rnn_layers), type(args.dropout), type(args.gpu),
-            type(args.batch_size), type(args.embedding_size),
-            type(args.bidirectional))
         model = models.RNN(
             number_labels, args.embeddings_file, dicts, args.rnn_dim,
             args.rnn_cell_type, args.rnn_layers, args.dropout, args.gpu,
             args.batch_size, args.embedding_size, args.bidirectional)
 
-    elif args.model == "conv_attn":
+    elif args.model == "caml":
         filter_size = int(args.filter_size)
-        model = models.ConvAttnPool(
+        model = models.CAML(
             number_labels, args.embeddings_file, filter_size, args.filter_maps,
             args.lmbda, args.gpu, dicts, embedding_size=args.embedding_size,
-            dropout=args.dropout, codes_embeddings=args.codes_embeddings)
-
+            dropout=args.dropout)
     else:
         # rewrite with "try - except" pattern
         logging.error("ERROR: unknown model '{}'".format(args.model))
@@ -200,35 +187,6 @@ def save_everything(args, metrics_hist_all, model, model_dir,
                     model.cuda()
     logging.info("Saved metrics, params, model to directory: {}".format(
         model_dir))
-
-
-def embed_text_file(model_name, text_file, embeddings_file):
-    """
-    Usage:
-    model_name = 'all-mpnet-base-v2'
-    model_name = 'BioBERT-mnli-snli-scinli-scitail-mednli-stsb'
-    model_full_name = 'pritamdeka/'+model_name
-    text_file = 'data/processed/Z.all.full.txt'
-    embeddings_file = 'data/processed/Z.emb.all.'+model_name+'.npy'
-
-    embed_text_file(model_full_name, text_file, embeddings_file)
-    """
-
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(model_name)
-
-    with open(text_file) as f:
-        sentences = f.readlines()
-
-    sentences = [sentence.rstrip('\n') for sentence in sentences]
-    print(len(sentences))
-
-    embeddings = model.encode(sentences)
-
-    print(embeddings.shape)
-    embeddings = model.encode(sentences)
-
-    np.save(embeddings_file, embeddings)
 
 
 def convert_label_codes_to_idx(data, c2ind):

@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-# from torch.nn.init import xavier_uniform
 from torch.nn.init import xavier_uniform_ as xavier_uniform
 from math import floor
 import logging
@@ -107,71 +106,6 @@ class BaseModel(nn.Module):
             # is balanced with regard to number of labels
             diffs.append(self.lmbda*diff*bi.size()[0])
         return diffs
-
-
-class LogReg(BaseModel):
-    """
-        Logistic regression model over average or max-pooled word vector input
-        TODO: remove 'get_attention' -- refactor from train --
-            models(desc_data and get_attention should be kwargs)
-    """
-
-    def __init__(
-            self, number_labels, embeddings_file, lmbda, gpu, dicts,
-            pool='max', embedding_size=100, dropout=0.5,
-            codes_embeddings=None):
-        super(LogReg, self).__init__(
-            number_labels, embeddings_file, dicts, lmbda,
-            dropout=dropout, gpu=gpu, embedding_size=embedding_size)
-        self.final = nn.Linear(embedding_size, number_labels)
-        # for nn.Linear see https://pytorch.org/.../torch.nn.Linear
-        # the embedding_size and number_labels define the weight matrix size.
-        if codes_embeddings:
-            self._codes_embeddings_init(codes_embeddings, dicts)
-        else:
-            xavier_uniform(self.final.weight)
-        self.pool = pool
-
-    # initialisation of the weight size as the code embeddings. -HD
-    def _codes_embeddings_init(self, codes_embeddings, dicts):
-        codes_embeddingss = KeyedVectors.load_word2vec_format(codes_embeddings)
-        # classmethod load_word2vec_format(fname, fvocab=None, binary=False,
-        #   encoding='utf8', unicode_errors='strict',
-        #   limit=None, datatype=<class 'numpy.float32'>)
-        # Load the input-hidden weight matrix from the original
-        #   C word2vec-tool format.
-        weights = np.zeros(self.final.weight.size())
-        for i in range(self.number_labels):
-            code = dicts['ind2c'][i]
-            weights[i] = codes_embeddingss[code]
-        # set weight as the code embeddings.
-        self.final.weight.data = torch.Tensor(weights).clone()
-
-    def forward(self, x, target, desc_data=None, get_attention=False):
-        # get embeddings
-        x = self.embed(x)
-
-        if self.pool == 'avg':
-            # average pooling, works but horrible performance
-            x = torch.mean(x, 1)
-        elif self.pool == 'max':
-            # TODO: read https://pytorch.org/docs/stable/generated/torch.nn.MaxPool1d.html#torch.nn.MaxPool1d  # noqa
-            # which size dim to take?
-            # torch.Size([16, 212, 100]), embed dim is 100
-            # mat1 and mat2 shapes cannot be multiplied (3392x1 and 100x50)
-            logging.info("kernel size used: {}".format(x.size()))
-            # kernel_size=x.size()[2]
-            x = F.max_pool1d(input=x, kernel_size=1)
-        else:
-            # average pooling
-            # TODO: log error???
-            x = torch.mean(x, 1)
-
-        logits = torch.sigmoid(input=self.final(x))
-        # only using the pooled, document embedding for logistic regression.
-        # In this case, it is also possible to apply SVM for the task.
-        loss = self._get_loss(logits, target, diffs=desc_data)
-        return logits, loss, None
 
 
 class BasicCNN(BaseModel):
