@@ -75,7 +75,7 @@ def prepare_x_y_csr_matrices(
         "kwargs": {
             "base_vect_configs": [
                 {
-                    "ngram_range": [1, 1],
+                    "ngram_range": [2, 2],
                     "min_df_cnt": 0,  # try 5 or 3
                     "max_df_ratio": 0.98,
                     "truncate_length": -1,
@@ -140,7 +140,7 @@ def main(args):
     number_labels, topk = args.number_labels, args.topk
     b_partitions = args.b_partitions
     model, load_model_from, hlt = args.model, args.load_model_from, args.hlt
-    label_feat_path = args.label_feat_path
+    label_feat_path, ignore_label_features = args.label_feat_path, args.ignore_label_features
     prepare_text_files = args.prepare_text_files
 
     X_trn, X_tst, Y_trn, Y_tst, Z_all = prepare_x_y_csr_matrices(
@@ -152,30 +152,37 @@ def main(args):
         logging.info(
             "Prepare hierarchical label tree (HLT), label features Z and "
             "cluster chain C")
-        if label_feat_path:
-            logging.info("Construct label features Z from embedding: "
-                         "{}".format(label_feat_path))
-            Z = Z_all
+        if ignore_label_features:
+            Z_all = None
+            logging.info("ignore Z features")
         else:
-            logging.info("Construct label features Z by applying PIFA "
-                         "clustering")
-            Z = LabelEmbeddingFactory.create(
-                Y_trn, X_trn, Z=Z_all, method="pifa_lf_concat")
+            logging.info(
+                "Construct label features Z by applying PIFA clustering")
+        Z_all = LabelEmbeddingFactory.create(
+            Y_trn, X_trn, Z=Z_all, method="pifa_lf_concat")
 
         logging.info("Recursively generate label cluster chain, with cluster"
                      f"size B={b_partitions}")
         cluster_chain = Indexer.gen(
-            feat_mat=Z, indexer_type="hierarchicalkmeans",
+            feat_mat=Z_all, indexer_type="hierarchicalkmeans",
             max_leaf_size=100, nr_splits=b_partitions,
             spherical=True, do_sample=False, verbose=3)
+
         logging.debug(
             f"{len(cluster_chain)} layers in the trained hierarchical label "
             "tree with C[d] as:")
         for d, C in enumerate(cluster_chain):
             logging.debug(
-                f"cluster_chain[{d}] is a {C.getformat()} matrix of \
-                shape {C.shape}")
+                f"cluster_chain[{d}] is a {C.getformat()} matrix of "
+                f"shape {C.shape}")
+        for d, C in enumerate(cluster_chain):
+            logging.debug(
+                f"cluster_chain[{d}] has value: {C[d]}")
+
     else:
+        logging.warning(
+            "NO CLUSTER CHAIN! '--hlt' flag is missing. "
+            "Training will take forever")
         cluster_chain = None
 
     if load_model_from:
@@ -271,11 +278,16 @@ if __name__ == "__main__":
         "--b_partitions", type=int, default=16,
         help="B value for B-ary (recursive) partitioning of label set")
     parser.add_argument(
-        "--load_model_from", type=str, default=None)
+        "--load_model_from", type=str, default=None,
+        help='load trained XR linear model from dir path')
     parser.add_argument(
-        "--label_feat_path", type=str, default=None)
+        "--label_feat_path", type=str, default=None,
+        help='where sentence embeddings are stored')
     parser.add_argument(
         "--prepare_text_files", action="store_const", required=False,
+        const=True)
+    parser.add_argument(
+        "--ignore_label_features", action="store_const", required=False,
         const=True)
     parser.add_argument(
         "--hlt", action="store_const", required=False, const=True,

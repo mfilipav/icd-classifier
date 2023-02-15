@@ -17,54 +17,150 @@ from icd_classifier.settings import MIMIC_3_DIR
 from icd_classifier.data import data_utils
 
 
-def all_metrics(yhat, y, k=8, yhat_raw=None, calc_auc=True):
+############################
+# METRICS specific for ICD9 
+############################
+def results_by_type(number_labels, mdir):
     """
-        Inputs:
-            yhat: binary predictions matrix
-            y: binary ground truth matrix
-            k: for @k metrics
-            yhat_raw: prediction scores matrix (floats)
-        Outputs:
-            dict holding relevant metrics
+    preds_test.psv
+    193800|45.13|486|530.81|V15.82
+    158927|33.24|38.93|401.9|518.81|96.04|96.71|96.72
+    127022|250.00|272.4|276.2|401.9|414.01|427.31|428.0|V45.81|V58.61
+    177566|
+    
     """
-    names = ["acc", "prec", "rec", "f1"]
+    d2ind = {}
+    p2ind = {}
 
-    # macro
-    macro = all_macro(yhat, y)
+    # get predictions for diagnoses and procedures
+    diag_preds = defaultdict(lambda: set([]))
+    proc_preds = defaultdict(lambda: set([]))
+    preds = defaultdict(lambda: set())
+    with open('%s/preds_test.psv' % mdir, 'r') as f:
 
-    # micro
-    ymic = y.ravel()
-    yhatmic = yhat.ravel()
-    micro = all_micro(yhatmic, ymic)
+        r = csv.reader(f, delimiter='|')
+        for row in r:
+            if len(row) > 1:
+                for code in row[1:]:
+                    preds[row[0]].add(code)
+                    if code != '':
+                        try:
+                            # what throws the error here?
+                            # see reformat() function
+                            pos = code.index('.')
+                            if pos == 3 or (code[0] == 'E' and pos == 4):
+                                if code not in d2ind:
+                                    d2ind[code] = len(d2ind)
+                                diag_preds[row[0]].add(code)
+                            elif pos == 2:
+                                if code not in p2ind:
+                                    p2ind[code] = len(p2ind)
+                                proc_preds[row[0]].add(code)
+                        # TODO: cleanup this mess!!!
+                        except:
+                            if len(code) == 3 or (
+                               code[0] == 'E' and len(code) == 4):
+                                if code not in d2ind:
+                                    d2ind[code] = len(d2ind)
+                                diag_preds[row[0]].add(code)
+    # get ground truth for diagnoses and procedures
+    diag_golds = defaultdict(lambda: set([]))
+    proc_golds = defaultdict(lambda: set([]))
+    golds = defaultdict(lambda: set())
+    test_file = '%s/test_%s.csv' % (MIMIC_3_DIR, str(number_labels))
+    with open(test_file, 'r') as f:
+        r = csv.reader(f)
+        # header
+        next(r)
+        for row in r:
+            codes = set([c for c in row[3].split(';')])
+            for code in codes:
+                golds[row[1]].add(code)
+                try:
+                    pos = code.index('.')
+                    if pos == 3:
+                        if code not in d2ind:
+                            d2ind[code] = len(d2ind)
+                        diag_golds[row[1]].add(code)
+                    elif pos == 2:
+                        if code not in p2ind:
+                            p2ind[code] = len(p2ind)
+                        proc_golds[row[1]].add(code)
+                except:
+                    if len(code) == 3 or (code[0] == 'E' and len(code) == 4):
+                        if code not in d2ind:
+                            d2ind[code] = len(d2ind)
+                        diag_golds[row[1]].add(code)
 
-    metrics = {names[i] + "_macro": macro[i] for i in range(len(macro))}
-    metrics.update({names[i] + "_micro": micro[i] for i in range(len(micro))})
+    hadm_ids = sorted(
+        set(diag_golds.keys()).intersection(set(diag_preds.keys())))
 
-    # AUC and @k
-    if yhat_raw is not None and calc_auc:
-        # allow k to be passed as int or list
-        if type(k) != list:
-            k = [k]
-        for k_i in k:
-            rec_at_k = recall_at_k(yhat_raw, y, k_i)
-            metrics['rec_at_%d' % k_i] = rec_at_k
-            prec_at_k = precision_at_k(yhat_raw, y, k_i)
-            metrics['prec_at_%d' % k_i] = prec_at_k
-            metrics['f1_at_%d' % k_i] = 2 * (prec_at_k * rec_at_k) / (
-                prec_at_k + rec_at_k)
-
-        roc_auc = auc_metrics(yhat_raw, y, ymic)
-        metrics.update(roc_auc)
-
-    return metrics
+    ind2d = {i: d for d, i in d2ind.items()}
+    ind2p = {i: p for p, i in p2ind.items()}
+    type_dicts = (ind2d, ind2p)
+    return (diag_preds, diag_golds, proc_preds, proc_golds,
+            golds, preds, hadm_ids, type_dicts)
 
 
-def all_macro(yhat, y):
-    return macro_accuracy(yhat, y), macro_precision(yhat, y), macro_recall(yhat, y), macro_f1(yhat, y)
+def diag_f1(diag_preds, diag_golds, ind2d, hadm_ids):
+    num_labels = len(ind2d)
+    yhat_diag = np.zeros((len(hadm_ids), num_labels))
+    y_diag = np.zeros((len(hadm_ids), num_labels))
+    for i, hadm_id in tqdm(enumerate(hadm_ids)):
+        yhat_diag_inds = [
+            1 if ind2d[j] in diag_preds[hadm_id] else 0 for j in range(num_labels)]
+        gold_diag_inds = [
+            1 if ind2d[j] in diag_golds[hadm_id] else 0 for j in range(num_labels)]
+        yhat_diag[i] = yhat_diag_inds
+        y_diag[i] = gold_diag_inds
+    return micro_f1(yhat_diag.ravel(), y_diag.ravel())
 
 
-def all_micro(yhatmic, ymic):
-    return micro_accuracy(yhatmic, ymic), micro_precision(yhatmic, ymic), micro_recall(yhatmic, ymic), micro_f1(yhatmic, ymic)
+def proc_f1(proc_preds, proc_golds, ind2p, hadm_ids):
+    num_labels = len(ind2p)
+    yhat_proc = np.zeros((len(hadm_ids), num_labels))
+    y_proc = np.zeros((len(hadm_ids), num_labels))
+    for i, hadm_id in tqdm(enumerate(hadm_ids)):
+        yhat_proc_inds = [
+            1 if ind2p[j] in proc_preds[hadm_id] else 0 for j in range(num_labels)]
+        gold_proc_inds = [
+            1 if ind2p[j] in proc_golds[hadm_id] else 0 for j in range(num_labels)]
+        yhat_proc[i] = yhat_proc_inds
+        y_proc[i] = gold_proc_inds
+    return micro_f1(yhat_proc.ravel(), y_proc.ravel())
+
+
+def metrics_from_dicts(preds, golds, mdir, ind2c):
+    with open('%s/pred_100_scores_test.json' % mdir, 'r') as f:
+        scors = json.load(f)
+
+    hadm_ids = sorted(set(golds.keys()).intersection(set(preds.keys())))
+    num_labels = len(ind2c)
+    yhat = np.zeros((len(hadm_ids), num_labels))
+    yhat_raw = np.zeros((len(hadm_ids), num_labels))
+    y = np.zeros((len(hadm_ids), num_labels))
+    for i, hadm_id in tqdm(enumerate(hadm_ids)):
+        yhat_inds = [
+            1 if ind2c[j] in preds[hadm_id] else 0 for j in range(num_labels)]
+        yhat_raw_inds = [
+            scors[hadm_id][ind2c[j]] if ind2c[j] in scors[hadm_id] else 0 for j in range(num_labels)]
+        gold_inds = [
+            1 if ind2c[j] in golds[hadm_id] else 0 for j in range(num_labels)]
+        yhat[i] = yhat_inds
+        yhat_raw[i] = yhat_raw_inds
+        y[i] = gold_inds
+    return yhat, yhat_raw, y, all_metrics(
+        yhat, y, yhat_raw=yhat_raw, calc_auc=False)
+
+
+def union_size(yhat, y, axis):
+    # axis=0 for label-level union (macro). axis=1 for instance-level
+    return np.logical_or(yhat, y).sum(axis=axis).astype(float)
+
+
+def intersect_size(yhat, y, axis):
+    # axis=0 for label-level union (macro). axis=1 for instance-level
+    return np.logical_and(yhat, y).sum(axis=axis).astype(float)
 
 
 #########################################################################
@@ -214,150 +310,54 @@ def auc_metrics(yhat_raw, y, ymic):
     return roc_auc
 
 
-########################
-# METRICS BY CODE TYPE
-########################
-def results_by_type(number_labels, mdir):
+def all_metrics(yhat, y, k=8, yhat_raw=None, calc_auc=True):
     """
-    preds_test.psv
-    193800|45.13|486|530.81|V15.82
-    158927|33.24|38.93|401.9|518.81|96.04|96.71|96.72
-    127022|250.00|272.4|276.2|401.9|414.01|427.31|428.0|V45.81|V58.61
-    177566|
-    
+        Inputs:
+            yhat: binary predictions matrix
+            y: binary ground truth matrix
+            k: for @k metrics
+            yhat_raw: prediction scores matrix (floats)
+        Outputs:
+            dict holding relevant metrics
     """
-    d2ind = {}
-    p2ind = {}
+    names = ["acc", "prec", "rec", "f1"]
 
-    # get predictions for diagnoses and procedures
-    diag_preds = defaultdict(lambda: set([]))
-    proc_preds = defaultdict(lambda: set([]))
-    preds = defaultdict(lambda: set())
-    with open('%s/preds_test.psv' % mdir, 'r') as f:
+    # macro
+    macro = all_macro(yhat, y)
 
-        r = csv.reader(f, delimiter='|')
-        for row in r:
-            if len(row) > 1:
-                for code in row[1:]:
-                    preds[row[0]].add(code)
-                    if code != '':
-                        try:
-                            # what throws the error here?
-                            # see reformat() function
-                            pos = code.index('.')
-                            if pos == 3 or (code[0] == 'E' and pos == 4):
-                                if code not in d2ind:
-                                    d2ind[code] = len(d2ind)
-                                diag_preds[row[0]].add(code)
-                            elif pos == 2:
-                                if code not in p2ind:
-                                    p2ind[code] = len(p2ind)
-                                proc_preds[row[0]].add(code)
-                        # TODO: cleanup this mess!!!
-                        except:
-                            if len(code) == 3 or (
-                               code[0] == 'E' and len(code) == 4):
-                                if code not in d2ind:
-                                    d2ind[code] = len(d2ind)
-                                diag_preds[row[0]].add(code)
-    # get ground truth for diagnoses and procedures
-    diag_golds = defaultdict(lambda: set([]))
-    proc_golds = defaultdict(lambda: set([]))
-    golds = defaultdict(lambda: set())
-    test_file = '%s/test_%s.csv' % (MIMIC_3_DIR, str(number_labels))
-    with open(test_file, 'r') as f:
-        r = csv.reader(f)
-        # header
-        next(r)
-        for row in r:
-            codes = set([c for c in row[3].split(';')])
-            for code in codes:
-                golds[row[1]].add(code)
-                try:
-                    pos = code.index('.')
-                    if pos == 3:
-                        if code not in d2ind:
-                            d2ind[code] = len(d2ind)
-                        diag_golds[row[1]].add(code)
-                    elif pos == 2:
-                        if code not in p2ind:
-                            p2ind[code] = len(p2ind)
-                        proc_golds[row[1]].add(code)
-                except:
-                    if len(code) == 3 or (code[0] == 'E' and len(code) == 4):
-                        if code not in d2ind:
-                            d2ind[code] = len(d2ind)
-                        diag_golds[row[1]].add(code)
+    # micro
+    ymic = y.ravel()
+    yhatmic = yhat.ravel()
+    micro = all_micro(yhatmic, ymic)
 
-    hadm_ids = sorted(
-        set(diag_golds.keys()).intersection(set(diag_preds.keys())))
+    metrics = {names[i] + "_macro": macro[i] for i in range(len(macro))}
+    metrics.update({names[i] + "_micro": micro[i] for i in range(len(micro))})
 
-    ind2d = {i: d for d, i in d2ind.items()}
-    ind2p = {i: p for p, i in p2ind.items()}
-    type_dicts = (ind2d, ind2p)
-    return (diag_preds, diag_golds, proc_preds, proc_golds,
-            golds, preds, hadm_ids, type_dicts)
+    # AUC and @k
+    if yhat_raw is not None and calc_auc:
+        # allow k to be passed as int or list
+        if type(k) != list:
+            k = [k]
+        for k_i in k:
+            rec_at_k = recall_at_k(yhat_raw, y, k_i)
+            metrics['rec_at_%d' % k_i] = rec_at_k
+            prec_at_k = precision_at_k(yhat_raw, y, k_i)
+            metrics['prec_at_%d' % k_i] = prec_at_k
+            metrics['f1_at_%d' % k_i] = 2 * (prec_at_k * rec_at_k) / (
+                prec_at_k + rec_at_k)
+
+        roc_auc = auc_metrics(yhat_raw, y, ymic)
+        metrics.update(roc_auc)
+
+    return metrics
 
 
-def diag_f1(diag_preds, diag_golds, ind2d, hadm_ids):
-    num_labels = len(ind2d)
-    yhat_diag = np.zeros((len(hadm_ids), num_labels))
-    y_diag = np.zeros((len(hadm_ids), num_labels))
-    for i, hadm_id in tqdm(enumerate(hadm_ids)):
-        yhat_diag_inds = [
-            1 if ind2d[j] in diag_preds[hadm_id] else 0 for j in range(num_labels)]
-        gold_diag_inds = [
-            1 if ind2d[j] in diag_golds[hadm_id] else 0 for j in range(num_labels)]
-        yhat_diag[i] = yhat_diag_inds
-        y_diag[i] = gold_diag_inds
-    return micro_f1(yhat_diag.ravel(), y_diag.ravel())
+def all_macro(yhat, y):
+    return macro_accuracy(yhat, y), macro_precision(yhat, y), macro_recall(yhat, y), macro_f1(yhat, y)
 
 
-def proc_f1(proc_preds, proc_golds, ind2p, hadm_ids):
-    num_labels = len(ind2p)
-    yhat_proc = np.zeros((len(hadm_ids), num_labels))
-    y_proc = np.zeros((len(hadm_ids), num_labels))
-    for i, hadm_id in tqdm(enumerate(hadm_ids)):
-        yhat_proc_inds = [
-            1 if ind2p[j] in proc_preds[hadm_id] else 0 for j in range(num_labels)]
-        gold_proc_inds = [
-            1 if ind2p[j] in proc_golds[hadm_id] else 0 for j in range(num_labels)]
-        yhat_proc[i] = yhat_proc_inds
-        y_proc[i] = gold_proc_inds
-    return micro_f1(yhat_proc.ravel(), y_proc.ravel())
-
-
-def metrics_from_dicts(preds, golds, mdir, ind2c):
-    with open('%s/pred_100_scores_test.json' % mdir, 'r') as f:
-        scors = json.load(f)
-
-    hadm_ids = sorted(set(golds.keys()).intersection(set(preds.keys())))
-    num_labels = len(ind2c)
-    yhat = np.zeros((len(hadm_ids), num_labels))
-    yhat_raw = np.zeros((len(hadm_ids), num_labels))
-    y = np.zeros((len(hadm_ids), num_labels))
-    for i, hadm_id in tqdm(enumerate(hadm_ids)):
-        yhat_inds = [
-            1 if ind2c[j] in preds[hadm_id] else 0 for j in range(num_labels)]
-        yhat_raw_inds = [
-            scors[hadm_id][ind2c[j]] if ind2c[j] in scors[hadm_id] else 0 for j in range(num_labels)]
-        gold_inds = [
-            1 if ind2c[j] in golds[hadm_id] else 0 for j in range(num_labels)]
-        yhat[i] = yhat_inds
-        yhat_raw[i] = yhat_raw_inds
-        y[i] = gold_inds
-    return yhat, yhat_raw, y, all_metrics(
-        yhat, y, yhat_raw=yhat_raw, calc_auc=False)
-
-
-def union_size(yhat, y, axis):
-    # axis=0 for label-level union (macro). axis=1 for instance-level
-    return np.logical_or(yhat, y).sum(axis=axis).astype(float)
-
-
-def intersect_size(yhat, y, axis):
-    # axis=0 for label-level union (macro). axis=1 for instance-level
-    return np.logical_and(yhat, y).sum(axis=axis).astype(float)
+def all_micro(yhatmic, ymic):
+    return micro_accuracy(yhatmic, ymic), micro_precision(yhatmic, ymic), micro_recall(yhatmic, ymic), micro_f1(yhatmic, ymic)
 
 
 def print_metrics(metrics):
